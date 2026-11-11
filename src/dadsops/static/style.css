@@ -1,0 +1,118 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  --bg: #f6f7f9;
+  --fg: #1d2330;
+  --muted: #5b6475;
+  --card: #ffffff;
+  --border: #d9dde5;
+  --accent: #2f6fdb;
+  --ok: #1f7a43;
+  --warn: #8a5a00;
+  --error: #b42318;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body.theme-dark {
+  --bg: #14171d;
+  --fg: #e6e9ef;
+  --muted: #a0a8b8;
+  --card: #1d222b;
+  --border: #323946;
+  --accent: #6ea0ff;
+  --ok: #5cc98a;
+  --warn: #e0b04f;
+  --error: #ff7b72;
+}
+
+a { color: var(--accent); }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+.brand span { font-weight: 400; color: var(--muted); margin-left: 0.4rem; }
+.topbar nav a { margin-left: 1rem; }
+
+main { max-width: 64rem; margin: 0 auto; padding: 1.5rem; }
+footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2rem 1rem; }
+
+.banner { padding: 0.7rem 1rem; border-radius: 6px; border: 1px solid; }
+.banner-error { color: var(--error); border-color: var(--error); }
+.banner-ok { color: var(--ok); border-color: var(--ok); }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  gap: 0.9rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card.status-installed:hover { border-color: var(--accent); }
+.card.status-not-found, .card.status-coming-soon { opacity: 0.75; }
+.card h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
+
+/* The whole card is the start/open link. */
+.card-link { text-decoration: none; }
+.card-link::after { content: ""; position: absolute; inset: 0; }
+.card.is-starting { cursor: progress; }
+.card.is-starting .card-link::before { content: "Starting… "; color: var(--muted); }
+
+.icon { width: 2.5rem; height: 2.5rem; flex: none; }
+.icon rect { fill: var(--accent); }
+.icon text { fill: var(--card); font: 700 15px system-ui, sans-serif; }
+
+.description { margin: 0 0 0.5rem; color: var(--muted); }
+.meta { margin: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.badge {
+  font-size: 0.78rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge-installed, .badge-running { color: var(--ok); }
+.badge-not-found { color: var(--error); }
+.badge-coming-soon { color: var(--warn); }
+
+.failure { color: var(--error); margin: 0.5rem 0 0; font-size: 0.9rem; }
+
+/* Keep the stop button clickable above the card-wide link. */
+.stop { position: relative; z-index: 1; margin-top: 0.6rem; }
+
+.settings { display: grid; gap: 0.9rem; max-width: 24rem; }
+.settings label { display: grid; gap: 0.3rem; font-weight: 600; }
+.settings input, .settings select {
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+}
+
+button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+  cursor: pointer;
+}
+.hint { color: var(--muted); }

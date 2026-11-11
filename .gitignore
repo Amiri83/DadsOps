@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+*.log
+.DS_Store
+reference/
+# Shared settings live in ~/.config/dadsops/; never commit a local copy.
+config.yaml

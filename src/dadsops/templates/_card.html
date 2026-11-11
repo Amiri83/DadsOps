@@ -1,0 +1,28 @@
+{% set tool = card.tool %}
+{% set status = tool.status %}
+<article class="card status-{{ status | replace(' ', '-') }}" data-tool="{{ tool.name }}">
+  <svg class="icon" viewBox="0 0 32 32" aria-hidden="true">
+    <rect x="1" y="1" width="30" height="30" rx="7"></rect>
+    <text x="16" y="21" text-anchor="middle">{{ tool.name[0] }}</text>
+  </svg>
+  <div class="card-body">
+    <h2>
+      {% if status == "installed" %}
+      <a class="card-link" href="/open/{{ tool.name }}">{{ tool.name }}</a>
+      {% else %}
+      {{ tool.name }}
+      {% endif %}
+    </h2>
+    {% if tool.description %}<p class="description">{{ tool.description }}</p>{% endif %}
+    <p class="meta">
+      <span class="badge badge-{{ status | replace(' ', '-') }}">{{ status }}</span>
+      {% if card.running %}<span class="badge badge-running">running on :{{ tool.port }}</span>{% endif %}
+    </p>
+    {% if card.error %}<p class="failure" role="alert">{{ card.error }}</p>{% endif %}
+    {% if card.owned %}
+    <form class="stop" method="post" action="/stop/{{ tool.name }}">
+      <button type="submit">Stop</button>
+    </form>
+    {% endif %}
+  </div>
+</article>

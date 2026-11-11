@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DadsOps{% endblock %} · Daddy's AWS Toolbox</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="theme-{{ theme }}">
+  <header class="topbar">
+    <a class="brand" href="/">DadsOps <span>Daddy's AWS Toolbox</span></a>
+    <nav><a href="/">Tools</a><a href="/settings">Settings</a></nav>
+  </header>
+  <main>
+    {% if settings_error %}
+    <p class="banner banner-error">Settings file problem: {{ settings_error }}</p>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Read-only toward AWS: DadsOps never calls AWS itself and stores no credentials.</footer>
+</body>
+</html>
