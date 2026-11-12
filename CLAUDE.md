@@ -8,7 +8,9 @@ their own (also read-only) work.
 
 ## Rules for this repo
 
-- Python 3.11+, `src/dadsops/` layout, FastAPI + Jinja2 templates, no build step.
+- Python 3.11+, flat `dadsops/` layout, FastAPI + Jinja2 templates, no build step.
+- `__init__.py`, `__main__.py`, `cli.py` and `paths.py` import only the standard library
+  so a bare `python3 -m dadsops` can bootstrap `.venv`.
 - `pyproject.toml` is the single source of truth for deps and the `dadsops` entry point.
 - **No network in tests.** Bind to `127.0.0.1` on port 0, never to a real port; start a
   real process only through a fake command, a stub script in `tmp_path` or a monkeypatched
@@ -26,16 +28,22 @@ their own (also read-only) work.
 ## Layout
 
 ```
-src/dadsops/
-  __init__.py
-  app.py            # FastAPI app factory + routes
-  registry.py       # tools.yaml loading + validation
-  config.py         # shared settings file (AWS profile, region, theme)
+dadsops/
+  __init__.py       # __version__ (single source, read by pyproject.toml)
+  __main__.py       # `python3 -m dadsops`
+  cli.py            # `dadsops` command: bootstrap .venv, run the toolbox
+  paths.py          # checkout vs installed, registry/config/log locations
+  app.py            # FastAPI app factory + routes (home, open/stop, settings, logs)
+  registry.py       # tools.yaml loading + validation + placeholders
+  config.py         # shared settings (profiles, log dir, theme, per-app) + Launch
+  forms.py          # settings page form <-> Settings
+  logs.py           # safe per-tool log path + tail
   runner.py         # start/stop/status of a tool process (port + PID)
-  cli.py            # `dadsops` command: install deps, run the toolbox
-  templates/        # home page + card fragments
+  default_tools.yaml  # packaged registry, copied to ~/.config/dadsops/ when installed
+  templates/        # home, settings, logs pages + card fragment
   static/           # css/js, no CDN
-tools.yaml          # tool registry (name, path, start command, port)
+tools.yaml          # tool registry for a checkout (name, path, start command, port)
+.github/workflows/  # tests.yml (CI), publish.yml (PyPI trusted publishing on v* tags)
 tests/
   fixtures/         # small yaml/json fixtures
 ```

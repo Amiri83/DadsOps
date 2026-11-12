@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from dadsops.config import Settings, child_env
+from dadsops.config import ConfigError, Launch
 from dadsops.registry import Tool
 
 HOST = "127.0.0.1"
@@ -56,12 +56,10 @@ class StartResult:
 class Runner:
     def __init__(
         self,
-        log_dir: Path,
         probe: Callable[[Tool], bool] = is_ready,
         start_timeout: float = 30.0,
         poll_interval: float = 0.2,
     ) -> None:
-        self.log_dir = Path(log_dir)
         self.start_timeout = start_timeout
         self.poll_interval = poll_interval
         self.errors: dict[str, str] = {}
@@ -77,13 +75,14 @@ class Runner:
     def is_running(self, tool: Tool) -> bool:
         return self.owns(tool.name) or self._probe(tool)
 
-    def start(self, tool: Tool, settings: Settings) -> StartResult:
-        with self._lock(tool.name):
-            result = self._start(tool, settings)
+    def start(self, launch: Launch) -> StartResult:
+        name = launch.tool.name
+        with self._lock(name):
+            result = self._start(launch)
         if result.ok:
-            self.errors.pop(tool.name, None)
+            self.errors.pop(name, None)
         else:
-            self.errors[tool.name] = result.message
+            self.errors[name] = result.message
         return result
 
     def stop(self, tool: Tool) -> bool:
@@ -106,22 +105,34 @@ class Runner:
         with self._locks_guard:
             return self._locks.setdefault(name, threading.Lock())
 
-    def _start(self, tool: Tool, settings: Settings) -> StartResult:
+    def _start(self, launch: Launch) -> StartResult:
+        tool = launch.tool
         if self.is_running(tool):
             return StartResult(ok=True, started=False, message="already running")
         if tool.coming_soon:
             return StartResult(ok=False, started=False, message="coming soon")
+        if not launch.enabled:
+            return StartResult(ok=False, started=False, message="disabled in settings")
         if not tool.installed:
             return StartResult(ok=False, started=False, message=f"not found at {tool.path}")
+        try:
+            command = launch.command()
+        except ConfigError as exc:
+            return StartResult(ok=False, started=False, message=str(exc))
 
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = self.log_dir / f"{tool.name}.log"
-        with log_path.open("wb") as log:
+        log_path = launch.log_path
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            log = log_path.open("wb")
+        except OSError as exc:
+            reason = f"cannot write log {log_path}: {exc.strerror or exc}"
+            return StartResult(ok=False, started=False, message=reason)
+        with log:
             try:
                 proc = subprocess.Popen(
-                    tool.command(),
+                    command,
                     cwd=tool.path,
-                    env=child_env(settings, tool.port),
+                    env=launch.env(),
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=subprocess.STDOUT,

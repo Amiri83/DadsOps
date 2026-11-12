@@ -1,11 +1,13 @@
 import re
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from dadsops.app import create_app
-from dadsops.config import Settings, load_settings, save_settings
+from dadsops.config import AppSettings, Profile, Settings, load_settings, save_settings
 from dadsops.runner import Runner, StartResult
 
 SAME_ORIGIN = {"origin": "http://testserver"}
@@ -15,15 +17,15 @@ FORM = {"content-type": "application/x-www-form-urlencoded", **SAME_ORIGIN}
 class FakeRunner(Runner):
     """Records start/stop calls instead of spawning anything."""
 
-    def __init__(self, tmp_path: Path, start_result: StartResult | None = None):
-        super().__init__(log_dir=tmp_path / "logs", probe=lambda _tool: False)
+    def __init__(self, start_result: StartResult | None = None):
+        super().__init__(probe=lambda _tool: False)
         self.start_result = start_result or StartResult(ok=True, started=True, message="ok")
-        self.started: list[tuple[str, Settings]] = []
+        self.started: list = []
 
-    def start(self, tool, settings):
-        self.started.append((tool.name, settings))
+    def start(self, launch):
+        self.started.append(launch)
         if not self.start_result.ok:
-            self.errors[tool.name] = self.start_result.message
+            self.errors[launch.tool.name] = self.start_result.message
         return self.start_result
 
 
@@ -35,7 +37,7 @@ def registry(write_registry, tool_dirs) -> Path:
                 "name": "tool_a",
                 "description": "Does A things.",
                 "path": str(tool_dirs["tool_a"]),
-                "start_command": "./run.sh",
+                "start_command": "./run.sh --port {port}",
                 "port": 9001,
             },
             {"name": "tool_b", "path": "missing", "start_command": "./run.sh", "port": 9002},
@@ -56,8 +58,24 @@ def config_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def fake_runner(tmp_path: Path) -> FakeRunner:
-    return FakeRunner(tmp_path)
+def log_dir(tmp_path: Path) -> Path:
+    return tmp_path / "logs"
+
+
+@pytest.fixture
+def saved_settings(config_file, log_dir) -> Settings:
+    settings = Settings(
+        profiles=(Profile("example", "us-east-1"), Profile("example-dev", "eu-west-1")),
+        default_profile="example",
+        log_dir=str(log_dir),
+    )
+    save_settings(settings, config_file)
+    return settings
+
+
+@pytest.fixture
+def fake_runner() -> FakeRunner:
+    return FakeRunner()
 
 
 @pytest.fixture
@@ -66,15 +84,44 @@ def client(registry, config_file, fake_runner):
         yield test_client
 
 
+def form_body(**overrides) -> str:
+    """A full settings form as the page submits it: two profiles plus the blank new row."""
+    fields = {
+        "theme": "light",
+        "log_dir": "/var/tmp/dadsops-logs",
+        "profile_name": ["example", "example-dev", ""],
+        "profile_region": ["us-east-1", "eu-west-1", ""],
+        "default_profile": "0",
+        "app": ["tool_a", "tool_b", "tool_c"],
+        "enabled.tool_a": "on",
+        "enabled.tool_b": "on",
+        "enabled.tool_c": "on",
+        "port.tool_a": "",
+        "port.tool_b": "",
+        "port.tool_c": "",
+        "profile.tool_a": "",
+        "profile.tool_b": "",
+        "profile.tool_c": "",
+        "args.tool_a": "",
+        "args.tool_b": "",
+        "args.tool_c": "",
+    }
+    fields.update(overrides)
+    return urlencode({k: v for k, v in fields.items() if v is not None}, doseq=True)
+
+
+def post_settings(client, **overrides):
+    return client.post(
+        "/settings", content=form_body(**overrides), headers=FORM, follow_redirects=False
+    )
+
+
 def test_home_renders_one_card_per_tool_with_status(client):
     page = client.get("/")
 
     assert page.status_code == 200
     cards = re.findall(r'<article class="card status-([a-z-]+)" data-tool="(\w+)"', page.text)
     assert cards == [("installed", "tool_a"), ("not-found", "tool_b"), ("coming-soon", "tool_c")]
-    assert '<span class="badge badge-installed">installed</span>' in page.text
-    assert '<span class="badge badge-not-found">not found</span>' in page.text
-    assert '<span class="badge badge-coming-soon">coming soon</span>' in page.text
     assert "Does A things." in page.text
     assert '<form class="open" method="post" action="/open/tool_a">' in page.text
     assert 'action="/open/tool_b"' not in page.text
@@ -86,25 +133,56 @@ def test_invalid_registry_shows_message_instead_of_crashing(config_file, fake_ru
     with TestClient(create_app(broken, config_file, runner=fake_runner)) as client:
         page = client.get("/")
         opened = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
+        logs = client.get("/logs")
 
     assert page.status_code == 200
     assert "Tool registry could not be loaded" in page.text
     assert "missing required key(s)" in page.text
     assert opened.headers["location"] == "/"
+    assert "No tools in the registry" in logs.text
 
 
-def test_open_starts_tool_and_redirects_to_it(client, fake_runner, config_file):
-    save_settings(Settings(aws_profile="example", theme="dark"), config_file)
-
+def test_open_starts_tool_with_settings_and_redirects_to_it(client, fake_runner, saved_settings):
     response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "http://127.0.0.1:9001/"
-    assert fake_runner.started == [("tool_a", load_settings(config_file))]
+    (launch,) = fake_runner.started
+    assert launch.tool.name == "tool_a"
+    assert launch.profile == Profile("example", "us-east-1")
+    assert launch.log_dir == Path(saved_settings.log_dir)
 
 
-def test_open_failure_returns_home_with_reason(registry, config_file, tmp_path):
-    runner = FakeRunner(tmp_path, StartResult(ok=False, started=False, message="did not answer"))
+def test_open_uses_the_per_app_port_over_the_registry(client, fake_runner, config_file):
+    save_settings(Settings(apps={"tool_a": AppSettings(port=9101)}), config_file)
+
+    response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
+
+    assert response.headers["location"] == "http://127.0.0.1:9101/"
+    assert fake_runner.started[0].command() == ("./run.sh", "--port", "9101")
+
+
+def test_disabled_tool_shows_as_disabled(client, config_file):
+    save_settings(Settings(apps={"tool_a": AppSettings(enabled=False)}), config_file)
+
+    page = client.get("/")
+
+    assert '<article class="card status-disabled" data-tool="tool_a">' in page.text
+    assert 'action="/open/tool_a"' not in page.text
+
+
+def test_open_with_a_broken_settings_file_does_not_start(client, fake_runner, config_file):
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("theme: neon\n")
+
+    client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
+
+    assert fake_runner.started == []
+    assert "settings are invalid" in client.get("/").text
+
+
+def test_open_failure_returns_home_with_reason(registry, config_file):
+    runner = FakeRunner(StartResult(ok=False, started=False, message="did not answer"))
     with TestClient(create_app(registry, config_file, runner=runner)) as client:
         response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
         page = client.get("/")
@@ -119,12 +197,12 @@ def test_open_unknown_tool_is_404(client):
 
 
 def test_open_accepts_same_origin_referer(client, fake_runner):
-    headers = {"referer": "http://testserver/"}
-
-    response = client.post("/open/tool_a", headers=headers, follow_redirects=False)
+    response = client.post(
+        "/open/tool_a", headers={"referer": "http://testserver/"}, follow_redirects=False
+    )
 
     assert response.status_code == 303
-    assert [name for name, _ in fake_runner.started] == ["tool_a"]
+    assert [launch.tool.name for launch in fake_runner.started] == ["tool_a"]
 
 
 @pytest.mark.parametrize(
@@ -145,7 +223,7 @@ def test_open_rejects_missing_or_foreign_origin(client, fake_runner, headers):
     assert fake_runner.started == []
 
 
-def test_get_open_no_longer_starts_anything(client, fake_runner):
+def test_get_open_does_not_start_anything(client, fake_runner):
     response = client.get("/open/tool_a", follow_redirects=False)
 
     assert response.status_code == 405
@@ -161,28 +239,165 @@ def test_stop_refuses_unowned_and_rejects_cross_origin(client):
     assert client.post("/stop/tool_a").status_code == 403
 
 
-def test_settings_page_saves_atomically_to_config(client, config_file):
-    assert client.get("/settings").status_code == 200
+def test_settings_page_shows_profiles_and_one_row_per_app(client, saved_settings):
+    page = client.get("/settings")
 
-    response = client.post(
-        "/settings",
-        content="aws_profile=example&aws_region=eu-central-1&theme=dark",
-        headers=FORM,
-        follow_redirects=False,
+    assert page.status_code == 200
+    assert page.text.count('name="profile_name"') == 3, "two profiles plus the blank new row"
+    assert re.search(r'name="default_profile" value="0"[^>]*checked', page.text)
+    assert re.findall(r'<tr data-app="(\w+)">', page.text) == ["tool_a", "tool_b", "tool_c"]
+    assert 'placeholder="9001"' in page.text
+
+
+def test_settings_page_saves_everything(client, config_file):
+    response = post_settings(
+        client,
+        theme="dark",
+        default_profile="1",
+        **{
+            "port.tool_a": "9101",
+            "profile.tool_a": "example-dev",
+            "args.tool_a": "--verbose --name 'a b'",
+            "enabled.tool_b": None,
+        },
     )
 
     assert response.status_code == 303
-    assert load_settings(config_file) == Settings("example", "eu-central-1", "dark")
+    assert load_settings(config_file) == Settings(
+        profiles=(Profile("example", "us-east-1"), Profile("example-dev", "eu-west-1")),
+        default_profile="example-dev",
+        log_dir="/var/tmp/dadsops-logs",
+        theme="dark",
+        apps={
+            "tool_a": AppSettings(
+                port=9101, profile="example-dev", extra_args=("--verbose", "--name", "a b")
+            ),
+            "tool_b": AppSettings(enabled=False),
+        },
+    )
     assert 'class="theme-dark"' in client.get("/").text
 
 
-def test_settings_page_rejects_invalid_values(client, config_file):
-    response = client.post(
-        "/settings",
-        content="aws_profile=bad+profile&aws_region=us-east-1&theme=light",
-        headers=FORM,
+def test_settings_page_adds_and_removes_profiles(client, config_file, saved_settings):
+    response = post_settings(
+        client,
+        profile_name=["example", "example-dev", "example-ops"],
+        profile_region=["us-east-1", "eu-west-1", "ap-southeast-2"],
+        profile_remove="0",
+        default_profile="2",
     )
 
+    assert response.status_code == 303
+    settings = load_settings(config_file)
+    assert settings.profiles == (
+        Profile("example-dev", "eu-west-1"),
+        Profile("example-ops", "ap-southeast-2"),
+    )
+    assert settings.default_profile == "example-ops"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"port.tool_a": "9005", "port.tool_b": "9005"}, "port 9005 is already used by tool_a"),
+        ({"port.tool_a": "9002"}, "port 9002 is already used by tool_a"),
+        ({"port.tool_a": "70000"}, "1 to 65535"),
+        ({"port.tool_a": "eighty"}, "whole number"),
+        ({"profile.tool_a": "ghost"}, "not in the profile list"),
+        ({"args.tool_a": "--name 'unclosed"}, "extra args cannot be parsed"),
+        ({"args.tool_a": "--token=abc"}, "looks like a secret"),
+        ({"default_profile": None}, "exactly one AWS profile"),
+        ({"profile_region": ["us-east-1", "Mars", ""]}, "region must look like"),
+        ({"log_dir": ""}, "log directory"),
+        ({"theme": "neon"}, "theme must be"),
+    ],
+)
+def test_invalid_submit_shows_reason_and_keeps_the_file(
+    client, config_file, saved_settings, overrides, message
+):
+    before = config_file.read_bytes()
+
+    response = post_settings(client, **overrides)
+
     assert response.status_code == 400
-    assert "AWS profile may use" in response.text
+    assert "Not saved:" in response.text
+    assert message in response.text.replace("&#39;", "'")
+    assert config_file.read_bytes() == before
+
+
+def test_rejected_submit_redisplays_what_was_typed(client, saved_settings):
+    response = post_settings(client, **{"port.tool_a": "eighty", "args.tool_a": "--verbose"})
+
+    assert 'value="eighty"' in response.text
+    assert 'value="--verbose"' in response.text
+
+
+def test_settings_post_rejects_cross_origin(client, config_file):
+    response = client.post(
+        "/settings",
+        content=form_body(),
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 403
     assert not config_file.exists()
+
+
+def test_logs_page_shows_the_last_200_lines_per_tool(client, saved_settings, log_dir):
+    log_dir.mkdir()
+    (log_dir / "tool_a.log").write_text("".join(f"tool_a line {i}\n" for i in range(1, 301)))
+
+    page = client.get("/logs")
+
+    assert page.status_code == 200
+    assert re.findall(r'<section class="log" data-tool="(\w+)">', page.text) == [
+        "tool_a",
+        "tool_b",
+        "tool_c",
+    ]
+    assert "tool_a line 101\n" in page.text
+    assert "tool_a line 100\n" not in page.text
+    assert "tool_a line 300" in page.text
+    assert page.text.count("No output yet") == 2
+
+
+def test_logs_page_empty_state(client, saved_settings):
+    page = client.get("/logs")
+
+    assert page.status_code == 200
+    assert page.text.count("No output yet") == 3
+    assert "<pre>" not in page.text
+
+
+def test_single_tool_log_page(client, saved_settings, log_dir):
+    log_dir.mkdir()
+    (log_dir / "tool_b.log").write_text("hello from tool_b\n")
+
+    page = client.get("/logs/tool_b")
+
+    assert page.status_code == 200
+    assert "hello from tool_b" in page.text
+    assert 'data-tool="tool_a"' not in page.text
+
+
+@pytest.mark.parametrize("name", ["%2E%2E", "%2E%2E%5Ctool_a", "tool_a.log", "%2Eenv"])
+def test_traversal_shaped_tool_name_is_rejected(client, saved_settings, tmp_path, name):
+    (tmp_path / "secret.log").write_text("must not leak")
+
+    response = client.get(f"/logs/{name}")
+
+    assert response.status_code == 400
+    assert "must not leak" not in response.text
+
+
+def test_unknown_tool_log_is_404(client, saved_settings):
+    assert client.get("/logs/tool_z").status_code == 404
+
+
+def test_settings_file_holds_no_secret_shaped_keys(client, config_file):
+    post_settings(client)
+
+    stored = yaml.safe_load(config_file.read_text())
+    flat = repr(stored).lower()
+    assert set(stored) == {"theme", "log_dir", "profiles", "apps"}
+    assert not any(word in flat for word in ("secret", "token", "access_key", "password"))

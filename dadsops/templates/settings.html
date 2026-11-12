@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="hint">One place for every app DadsOps starts. Stored in <code>{{ config_path }}</code>.
+  Profile names, regions, ports and paths only: never access keys, session tokens or any other secret.</p>
+{% if saved %}<p class="banner banner-ok">Saved.</p>{% endif %}
+{% if form_error %}<p class="banner banner-error" role="alert">Not saved: {{ form_error }}</p>{% endif %}
+<form class="settings" method="post" action="/settings">
+  <fieldset>
+    <legend>Global</legend>
+    <label>Log directory
+      <input name="log_dir" value="{{ form.log_dir }}" autocomplete="off" required>
+    </label>
+    <label>Theme
+      <select name="theme">
+        {% for theme_name in themes %}
+        <option value="{{ theme_name }}" {% if theme_name == form.theme %}selected{% endif %}>{{ theme_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>AWS profiles</legend>
+    <p class="hint">Forwarded as <code>AWS_PROFILE</code> / <code>AWS_REGION</code> and the
+      <code>{profile}</code> / <code>{region}</code> placeholders. Fill the last row to add one.</p>
+    <table>
+      <thead><tr><th>Name</th><th>Region</th><th>Default</th><th>Remove</th></tr></thead>
+      <tbody>
+        {% for profile in form.profiles %}
+        <tr>
+          <td><input name="profile_name" value="{{ profile.name }}" aria-label="Profile name" autocomplete="off"></td>
+          <td><input name="profile_region" value="{{ profile.region }}" aria-label="Region" autocomplete="off"></td>
+          <td><input type="radio" name="default_profile" value="{{ loop.index0 }}" aria-label="Default" {% if profile.default %}checked{% endif %}></td>
+          <td><input type="checkbox" name="profile_remove" value="{{ loop.index0 }}" aria-label="Remove"></td>
+        </tr>
+        {% endfor %}
+        <tr class="new-row">
+          <td><input name="profile_name" placeholder="new profile, e.g. example" aria-label="New profile name" autocomplete="off"></td>
+          <td><input name="profile_region" placeholder="us-east-1" aria-label="New profile region" autocomplete="off"></td>
+          <td><input type="radio" name="default_profile" value="{{ form.profiles | length }}" aria-label="Default"></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </fieldset>
+
+  <fieldset>
+    <legend>Apps</legend>
+    <p class="hint">Empty fields fall back to <code>tools.yaml</code>. Extra args are appended to the start
+      command, split like a shell would (quotes allowed).</p>
+    {% if form.apps %}
+    <table>
+      <thead><tr><th>App</th><th>Enabled</th><th>Port</th><th>AWS profile</th><th>Extra args</th></tr></thead>
+      <tbody>
+        {% for app in form.apps %}
+        <tr data-app="{{ app.name }}">
+          <td>{{ app.name }}<input type="hidden" name="app" value="{{ app.name }}"></td>
+          <td><input type="checkbox" name="enabled.{{ app.name }}" aria-label="Enabled" {% if app.enabled %}checked{% endif %}></td>
+          <td><input name="port.{{ app.name }}" value="{{ app.port }}" placeholder="{{ app.registry_port or '' }}"
+                     inputmode="numeric" size="6" aria-label="Port"></td>
+          <td>
+            <select name="profile.{{ app.name }}" aria-label="AWS profile">
+              <option value="">global default</option>
+              {% for profile in form.profiles %}
+              <option value="{{ profile.name }}" {% if profile.name == app.profile %}selected{% endif %}>{{ profile.name }}</option>
+              {% endfor %}
+              {% if app.profile and app.profile not in form.profiles | map(attribute='name') | list %}
+              <option value="{{ app.profile }}" selected>{{ app.profile }} (not in the list)</option>
+              {% endif %}
+            </select>
+          </td>
+          <td><input name="args.{{ app.name }}" value="{{ app.extra_args }}" aria-label="Extra args" autocomplete="off"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No apps in the registry.</p>
+    {% endif %}
+  </fieldset>
+
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

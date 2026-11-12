@@ -4,10 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dadsops"
-version = "0.1.0"
+dynamic = ["version"]
 description = "DadsOps - Daddy's AWS Toolbox: local launcher for the AWS portfolio tools"
 readme = "README.md"
+authors = [{ name = "Amir Amiri" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -25,19 +37,23 @@ dev = [
 [project.scripts]
 dadsops = "dadsops.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["dadsops"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dadsops.__version__" }
 
 [tool.setuptools.package-data]
-dadsops = ["templates/*.html", "static/*"]
+dadsops = ["templates/*.html", "static/*", "default_tools.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["reference"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]

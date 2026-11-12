@@ -1,5 +1,5 @@
 {% set tool = card.tool %}
-{% set status = tool.status %}
+{% set status = card.status %}
 <article class="card status-{{ status | replace(' ', '-') }}" data-tool="{{ tool.name }}">
   <svg class="icon" viewBox="0 0 32 32" aria-hidden="true">
     <rect x="1" y="1" width="30" height="30" rx="7"></rect>

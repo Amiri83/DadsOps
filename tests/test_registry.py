@@ -3,9 +3,12 @@ from pathlib import Path
 
 import pytest
 
+from dadsops.paths import DEFAULT_REGISTRY
 from dadsops.registry import RegistryError, load_registry
 
 FIXTURES = Path(__file__).parent / "fixtures"
+REPO_REGISTRY = Path(__file__).parents[1] / "tools.yaml"
+VALUES = {"port": "9001", "profile": "example", "region": "eu-west-1", "log_dir": "/tmp/logs"}
 
 
 @pytest.fixture
@@ -30,25 +33,47 @@ def test_loads_all_fields(valid_registry: Path):
     assert tool_c.coming_soon is True
 
 
-def test_port_placeholder_is_substituted_in_string_and_list_commands(valid_registry: Path):
+def test_placeholders_are_substituted_in_string_and_list_commands(valid_registry: Path):
     tool_a, tool_b, tool_c = load_registry(valid_registry)
 
-    assert tool_a.command() == (".venv/bin/python", "-m", "tool_a", "--port", "9001")
-    assert tool_b.command() == ("./run.sh", "--flag", "--listen=127.0.0.1:9002")
-    assert tool_c.command() == ("./run.sh",)
+    assert tool_a.command(VALUES) == (".venv/bin/python", "-m", "tool_a", "--port", "9001")
+    assert tool_b.command(VALUES) == ("./run.sh", "--flag", "--listen=127.0.0.1:9001")
+    assert tool_c.command(VALUES) == ("./run.sh",)
 
 
-def test_port_substitution_is_exact_and_leaves_other_text_alone(write_registry):
-    command = ["run", "{port}{port}", "{ports}", "{Port}", "{other}", "{{port}}", "a b"]
+def test_all_four_placeholders_are_substituted(write_registry):
+    command = ["run", "{port}{port}", "--profile={profile}", "{region}", "--logs", "{log_dir}"]
     (tool,) = load_registry(write_registry([base_entry(start_command=command)]))
 
-    assert tool.command() == ("run", "90019001", "{ports}", "{Port}", "{other}", "{9001}", "a b")
-    assert not any("{port}" in part for part in tool.command())
+    assert tool.placeholders() == {"port", "profile", "region", "log_dir"}
+    assert tool.command(VALUES) == (
+        "run",
+        "90019001",
+        "--profile=example",
+        "eu-west-1",
+        "--logs",
+        "/tmp/logs",
+    )
+
+
+def test_text_that_is_not_a_placeholder_is_left_alone(write_registry):
+    command = ["run", "{Port", "port}", "{}", '{"a": 1}', "a b"]
+    (tool,) = load_registry(write_registry([base_entry(start_command=command)]))
+
+    assert tool.command(VALUES) == tuple(command)
+
+
+@pytest.mark.parametrize("placeholder", ["{ports}", "{Port}", "{other}", "{token}"])
+def test_unknown_placeholder_is_rejected_at_load(write_registry, placeholder):
+    entry = base_entry(start_command=f"./run.sh --x {placeholder}")
+
+    with pytest.raises(RegistryError, match="unknown placeholder"):
+        load_registry(write_registry([entry]))
 
 
 def test_repo_registry_loads(tmp_path: Path):
     path = tmp_path / "tools.yaml"
-    shutil.copy(Path(__file__).parents[1] / "tools.yaml", path)
+    shutil.copy(REPO_REGISTRY, path)
 
     tools = {tool.name: tool for tool in load_registry(path)}
 
@@ -60,10 +85,19 @@ def test_repo_registry_loads(tmp_path: Path):
     }
     assert tools["TFLens"].path == (tmp_path.parent / "tflens").resolve()
     assert tools["TFLens"].description == "Explain Terraform repos: resources, access, code refs"
-    assert tools["TFLens"].command()[-3:] == ("serve", "--port", "8083")
     for tool in tools.values():
-        assert tool.command()[-2:] == ("--port", str(tool.port))
-        assert not any("{port}" in part for part in tool.command())
+        assert tool.command({"port": str(tool.port)})[-2:] == ("--port", str(tool.port))
+
+
+def test_packaged_default_lists_the_same_tools_as_the_checkout_registry():
+    def summary(path: Path) -> list[tuple]:
+        return [
+            (t.name, t.port, t.start_command, t.description, t.coming_soon)
+            for t in load_registry(path)
+        ]
+
+    assert summary(DEFAULT_REGISTRY) == summary(REPO_REGISTRY)
+    assert all(tool.path.is_absolute() for tool in load_registry(DEFAULT_REGISTRY))
 
 
 def test_status_comes_from_the_filesystem(valid_registry: Path):
@@ -101,6 +135,7 @@ def base_entry(**overrides) -> dict:
         ([base_entry(start_command=[])], "start_command must not be empty"),
         ([base_entry(start_command=["", "x"])], "start_command must not be empty"),
         ([base_entry(name="tool a")], "name must use only"),
+        ([base_entry(name="../tool_a")], "name must use only"),
         ([base_entry(path="")], "path must be"),
         ([base_entry(health_path="healthz")], "health_path must start"),
         ([base_entry(coming_soon="yes")], "coming_soon must be"),
