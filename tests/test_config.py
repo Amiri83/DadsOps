@@ -31,15 +31,33 @@ def test_missing_file_gives_defaults(tmp_path: Path):
     assert settings == Settings()
     assert settings.profiles == ()
     assert settings.log_dir == "~/.local/state/dadsops/logs"
-    assert settings.theme == "light"
     assert settings.app("tool_a") == AppSettings(port=None, profile=None, enabled=True)
+
+
+@pytest.mark.parametrize("value", ["dark", "light", "neon"])
+def test_legacy_theme_key_loads_and_is_ignored(tmp_path: Path, value: str):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"theme: {value}\nlog_dir: /var/tmp/dadsops-logs\n")
+
+    settings = load_settings(path)
+
+    assert settings == Settings(log_dir="/var/tmp/dadsops-logs")
+    assert not hasattr(settings, "theme")
+
+
+def test_legacy_theme_key_is_dropped_on_the_next_save(tmp_path: Path):
+    path = tmp_path / "config.yaml"
+    path.write_text("theme: dark\n")
+
+    save_settings(load_settings(path), path)
+
+    assert "theme" not in yaml.safe_load(path.read_text())
 
 
 def test_save_then_load_round_trip(tmp_path: Path):
     path = tmp_path / "sub" / "config.yaml"
     settings = two_profiles(
         log_dir=str(tmp_path / "logs"),
-        theme="dark",
         apps={
             "tool_a": AppSettings(port=9101, profile="example-dev", extra_args=("--verbose",)),
             "tool_b": AppSettings(enabled=False),
@@ -79,7 +97,7 @@ def test_save_is_atomic_when_replace_fails(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(config_module.os, "replace", broken_replace)
     with pytest.raises(OSError, match="disk full"):
-        save_settings(Settings(theme="dark"), path)
+        save_settings(Settings(log_dir="/var/tmp/other"), path)
 
     assert path.read_text() == before
     assert [p.name for p in tmp_path.iterdir()] == ["config.yaml"]
@@ -88,7 +106,6 @@ def test_save_is_atomic_when_replace_fails(tmp_path: Path, monkeypatch):
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"theme": "neon"}, "theme must be"),
         ({"log_dir": ""}, "log directory"),
         (
             {"profiles": (Profile("bad profile", "us-east-1"),), "default_profile": "bad profile"},
@@ -126,7 +143,7 @@ def test_invalid_settings_rejected(kwargs, message):
 @pytest.mark.parametrize(
     ("content", "message"),
     [
-        ("theme: light\naws_secret_access_key: nope\n", "unknown setting"),
+        ("log_dir: /var/tmp\naws_secret_access_key: nope\n", "unknown setting"),
         ("profiles:\n  - {name: example, region: us-east-1, session_token: x}\n", "unknown"),
         ("apps:\n  tool_a: {port: 9001, password: x}\n", "unknown"),
         ("apps:\n  tool_a: {extra_args: --verbose}\n", "list of strings"),
@@ -186,9 +203,9 @@ def test_override_port_clashing_with_another_registry_port_is_rejected(
         resolve(tools, Settings(apps={"tool_a": AppSettings(port=9002)}))
 
 
-def test_launch_env_forwards_profile_region_log_dir_theme_and_port(write_registry, fake_tool_entry):
+def test_launch_env_forwards_profile_region_log_dir_and_port(write_registry, fake_tool_entry):
     tools = load_registry(write_registry([fake_tool_entry("tool_a", port=9001)]))
-    (launch,) = resolve(tools, two_profiles(log_dir="/var/tmp/dadsops", theme="dark"))
+    (launch,) = resolve(tools, two_profiles(log_dir="/var/tmp/dadsops"))
 
     env = launch.env(base={"PATH": "/usr/bin"})
 
@@ -198,7 +215,6 @@ def test_launch_env_forwards_profile_region_log_dir_theme_and_port(write_registr
         "AWS_PROFILE": "example",
         "AWS_REGION": "us-east-1",
         "DADSOPS_LOG_DIR": "/var/tmp/dadsops",
-        "DADSOPS_THEME": "dark",
     }
 
 

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import shutil
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,11 +14,14 @@ from typing import Any
 
 import yaml
 
-REQUIRED_KEYS = ("name", "path", "start_command", "port")
-OPTIONAL_KEYS = ("description", "health_path", "coming_soon")
+REQUIRED_KEYS = ("name", "start_command", "port")
+OPTIONAL_KEYS = ("path", "description", "health_path", "coming_soon")
 PLACEHOLDERS = ("port", "profile", "region", "log_dir")
 PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# A tool without a path is a console script: looked up on PATH, then next to DadsOps's
+# own interpreter (the venv it runs from). Read at call time so tests can point it away.
+VENV_BIN = Path(sys.executable).parent
 
 
 class RegistryError(ValueError):
@@ -27,9 +33,42 @@ def placeholders_in(parts: tuple[str, ...] | list[str]) -> set[str]:
 
 
 @dataclass(frozen=True)
+class Location:
+    """Where a tool was found, checked live against the filesystem.
+
+    kind is "checkout" (its registry path exists), "path" (its command is on PATH),
+    "venv" (its command is in the DadsOps venv's bin/) or "missing".
+    """
+
+    kind: str
+    where: Path | None = None
+
+    @property
+    def found(self) -> bool:
+        return self.kind != "missing"
+
+    @property
+    def label(self) -> str:
+        """Short, for the card."""
+        if self.kind == "checkout":
+            return f"found: {_short(self.where)}"
+        return {"path": "found on PATH", "venv": "found in venv"}.get(self.kind, "not found")
+
+    @property
+    def detail(self) -> str:
+        """Longer, for the settings page: where exactly."""
+        prefix = {
+            "checkout": "checkout at",
+            "path": "on PATH:",
+            "venv": "in the DadsOps venv:",
+        }.get(self.kind)
+        return f"{prefix} {_short(self.where)}" if prefix else "not found"
+
+
+@dataclass(frozen=True)
 class Tool:
     name: str
-    path: Path
+    path: Path | None
     start_command: tuple[str, ...]
     port: int
     description: str = ""
@@ -46,8 +85,37 @@ class Tool:
         )
 
     @property
+    def program(self) -> str:
+        """The first word of start_command: what gets looked up when there is no path."""
+        return self.start_command[0]
+
+    def locate(self) -> Location:
+        """A checkout path must exist; with no path, the command must be on PATH or in the venv."""
+        if self.path is not None:
+            return Location("checkout", self.path) if self.path.is_dir() else Location("missing")
+        venv_bin = Path(VENV_BIN)
+        found = shutil.which(self.program)
+        if found is not None:
+            found_path = Path(found)
+            return Location("venv" if found_path.parent == venv_bin else "path", found_path)
+        found = shutil.which(self.program, path=str(venv_bin))
+        if found is not None:
+            return Location("venv", Path(found))
+        return Location("missing")
+
+    @property
     def installed(self) -> bool:
-        return self.path.is_dir()
+        return self.locate().found
+
+    @property
+    def workdir(self) -> Path:
+        """The checkout when there is one, else the user's home directory."""
+        return self.path if self.path is not None else Path(os.path.expanduser("~"))
+
+    def missing_reason(self) -> str:
+        if self.path is not None:
+            return f"not found at {self.path}"
+        return f"{self.program!r} not found on PATH or in the DadsOps venv"
 
     @property
     def status(self) -> str:
@@ -55,6 +123,16 @@ class Tool:
         if self.coming_soon:
             return "coming soon"
         return "installed" if self.installed else "not found"
+
+
+def _short(path: Path | None) -> str:
+    """path with the home directory shown as ~."""
+    if path is None:
+        return ""
+    try:
+        return f"~/{path.relative_to(Path(os.path.expanduser('~')))}"
+    except ValueError:
+        return str(path)
 
 
 def load_registry(path: Path) -> list[Tool]:
@@ -93,9 +171,9 @@ def _parse_entry(entry: Any, index: int, base: Path) -> Tool:
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise RegistryError(f"{where}: name must use only letters, digits, '-' or '_'")
 
-    raw_path = entry["path"]
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise RegistryError(f"{where}: path must be a non-empty string")
+    raw_path = entry.get("path")
+    if raw_path is not None and (not isinstance(raw_path, str) or not raw_path.strip()):
+        raise RegistryError(f"{where}: path must be a non-empty string (or left out)")
 
     port = entry["port"]
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
@@ -117,7 +195,7 @@ def _parse_entry(entry: Any, index: int, base: Path) -> Tool:
 
     return Tool(
         name=name,
-        path=(base / Path(raw_path).expanduser()).resolve(),
+        path=None if raw_path is None else (base / Path(raw_path).expanduser()).resolve(),
         start_command=_parse_command(entry["start_command"], where),
         port=port,
         description=description.strip(),

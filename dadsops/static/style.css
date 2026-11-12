@@ -1,152 +1,52 @@
-:root {
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-}
+/* DadsOps-only additions, loaded after theme/dadsops-theme.css. Colours, fonts and sizes
+   come from the theme's custom properties; nothing here redefines them. */
 
-body {
-  --bg: #f6f7f9;
-  --fg: #1d2330;
-  --muted: #5b6475;
-  --card: #ffffff;
-  --border: #d9dde5;
-  --accent: #2f6fdb;
-  --ok: #1f7a43;
-  --warn: #8a5a00;
-  --error: #b42318;
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-}
+/* ---------------------------------------------------------------- tool cards (home) */
+.card.status-installed:hover { border-color: var(--accent-border); }
+.card.status-not-found, .card.status-coming-soon, .card.status-disabled { opacity: .8; }
+.card-head { display: flex; align-items: center; gap: var(--sp-3); }
+.card-head h2 { font-size: var(--fs-md); }
+.card .description { margin: 0; color: var(--fg-muted); }
+.card .meta { margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.card .found { margin: 0; overflow-wrap: anywhere; }
+.card .actions { margin-top: auto; padding-top: var(--sp-1); }
 
-body.theme-dark {
-  --bg: #14171d;
-  --fg: #e6e9ef;
-  --muted: #a0a8b8;
-  --card: #1d222b;
-  --border: #323946;
-  --accent: #6ea0ff;
-  --ok: #5cc98a;
-  --warn: #e0b04f;
-  --error: #ff7b72;
-}
+.icon { width: 2.25rem; height: 2.25rem; flex: none; }
+.icon rect { fill: var(--accent-bg); stroke: var(--accent-border); }
+.icon text { fill: var(--accent); font: 700 15px var(--sans); }
 
-a { color: var(--accent); }
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.8rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-}
-.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
-.brand span { font-weight: 400; color: var(--muted); margin-left: 0.4rem; }
-.topbar nav a { margin-left: 1rem; }
-
-main { max-width: 64rem; margin: 0 auto; padding: 1.5rem; }
-footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2rem 1rem; }
-
-.banner { padding: 0.7rem 1rem; border-radius: 6px; border: 1px solid; }
-.banner-error { color: var(--error); border-color: var(--error); }
-.banner-ok { color: var(--ok); border-color: var(--ok); }
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-  gap: 1rem;
-}
-
-.card {
-  position: relative;
-  display: flex;
-  gap: 0.9rem;
-  padding: 1rem;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-.card.status-installed:hover { border-color: var(--accent); }
-.card.status-not-found, .card.status-coming-soon, .card.status-disabled { opacity: 0.75; }
-.card h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
-
-/* The whole card is the start/open button. */
+/* The whole card is the start/open button (a POST form around the title). */
 .card-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  padding: 0; border: 0; background: none; color: var(--fg); font: inherit; font-weight: 650;
+  text-align: left; cursor: pointer;
 }
-.card-link::after { content: ""; position: absolute; inset: 0; }
-.card.is-starting { cursor: progress; }
-.card.is-starting .card-link::before { content: "Starting… "; color: var(--muted); }
+.card-link:hover { filter: none; color: var(--accent); }
+.card-link::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+.open-hint { pointer-events: none; }
 
-.icon { width: 2.5rem; height: 2.5rem; flex: none; }
-.icon rect { fill: var(--accent); }
-.icon text { fill: var(--card); font: 700 15px system-ui, sans-serif; }
+/* Launch state: the POST blocks until the tool's port answers. */
+.card.is-starting { cursor: progress; border-color: var(--accent-border); }
+.card.is-starting .card-link::before { content: "Starting… "; color: var(--fg-faint); font-weight: 400; }
+.card.is-starting .open-hint { opacity: .6; }
 
-.description { margin: 0 0 0.5rem; color: var(--muted); }
-.meta { margin: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
-
-.badge {
-  font-size: 0.78rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid currentColor;
+.failure {
+  margin: 0; padding: .4rem .6rem; font-size: var(--fs-sm); color: var(--fg);
+  background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
 }
-.badge-installed, .badge-running { color: var(--ok); }
-.badge-not-found { color: var(--error); }
-.badge-coming-soon, .badge-disabled { color: var(--warn); }
-
-.failure { color: var(--error); margin: 0.5rem 0 0; font-size: 0.9rem; }
 
 /* Keep the stop button clickable above the card-wide link. */
-.stop { position: relative; z-index: 1; margin-top: 0.6rem; }
+.stop { position: relative; z-index: 1; margin: 0; }
 
-.settings { display: grid; gap: 1.2rem; }
-.settings fieldset {
-  display: grid;
-  gap: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-}
-.settings legend { font-weight: 700; }
-.settings label { display: grid; gap: 0.3rem; font-weight: 600; max-width: 28rem; }
-.settings table { border-collapse: collapse; width: 100%; }
-.settings th { text-align: left; font-size: 0.85rem; color: var(--muted); padding: 0.3rem; }
-.settings td { padding: 0.3rem; }
-.settings td input:not([type]), .settings td select { width: 100%; box-sizing: border-box; }
-.settings input, .settings select {
-  padding: 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--fg);
-}
-.settings > button { justify-self: start; }
+/* ---------------------------------------------------------------- settings */
+.settings label { max-width: 32rem; }
+.settings label input { width: 100%; margin-top: .2rem; }
+.app-found, .app-command { margin-top: var(--sp-1); overflow-wrap: anywhere; font-weight: 400; }
 
-.log { margin-bottom: 1.5rem; }
-.log h2 { font-size: 1.1rem; margin-bottom: 0.2rem; }
-.log pre {
-  max-height: 24rem;
-  overflow: auto;
-  padding: 0.8rem;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.82rem;
+/* ---------------------------------------------------------------- logs */
+.log {
+  margin-bottom: var(--sp-4); padding: 1rem 1.15rem; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius);
 }
-.empty { color: var(--muted); font-style: italic; }
-
-button {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--fg);
-  cursor: pointer;
-}
-.hint { color: var(--muted); }
+.log h2 { margin-top: 0; font-size: var(--fs-md); display: flex; gap: var(--sp-2); align-items: center; }
+.log pre { max-height: 24rem; background: var(--bg); font-size: 12.5px; }

@@ -4,20 +4,13 @@
 <h1>Settings</h1>
 <p class="hint">One place for every app DadsOps starts. Stored in <code>{{ config_path }}</code>.
   Profile names, regions, ports and paths only: never access keys, session tokens or any other secret.</p>
-{% if saved %}<p class="banner banner-ok">Saved.</p>{% endif %}
-{% if form_error %}<p class="banner banner-error" role="alert">Not saved: {{ form_error }}</p>{% endif %}
+{% if saved %}<p class="flash ok">Saved.</p>{% endif %}
+{% if form_error %}<p class="flash error" role="alert">Not saved: {{ form_error }}</p>{% endif %}
 <form class="settings" method="post" action="/settings">
   <fieldset>
     <legend>Global</legend>
     <label>Log directory
       <input name="log_dir" value="{{ form.log_dir }}" autocomplete="off" required>
-    </label>
-    <label>Theme
-      <select name="theme">
-        {% for theme_name in themes %}
-        <option value="{{ theme_name }}" {% if theme_name == form.theme %}selected{% endif %}>{{ theme_name }}</option>
-        {% endfor %}
-      </select>
     </label>
   </fieldset>
 
@@ -25,6 +18,7 @@
     <legend>AWS profiles</legend>
     <p class="hint">Forwarded as <code>AWS_PROFILE</code> / <code>AWS_REGION</code> and the
       <code>{profile}</code> / <code>{region}</code> placeholders. Fill the last row to add one.</p>
+    <div class="table-wrap">
     <table>
       <thead><tr><th>Name</th><th>Region</th><th>Default</th><th>Remove</th></tr></thead>
       <tbody>
@@ -44,6 +38,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
   </fieldset>
 
   <fieldset>
@@ -51,12 +46,23 @@
     <p class="hint">Empty fields fall back to <code>tools.yaml</code>. Extra args are appended to the start
       command, split like a shell would (quotes allowed).</p>
     {% if form.apps %}
+    <div class="table-wrap">
     <table>
       <thead><tr><th>App</th><th>Enabled</th><th>Port</th><th>AWS profile</th><th>Extra args</th></tr></thead>
       <tbody>
         {% for app in form.apps %}
+        {% set info = found.get(app.name) %}
         <tr data-app="{{ app.name }}">
-          <td>{{ app.name }}<input type="hidden" name="app" value="{{ app.name }}"></td>
+          <td>
+            <strong>{{ app.name }}</strong><input type="hidden" name="app" value="{{ app.name }}">
+            {% if info %}
+            <div class="app-found small">
+              <span class="badge {% if info.location.found %}ok{% else %}err{% endif %}">{{ info.location.label }}</span>
+              <span class="muted">{{ info.location.detail }}</span>
+            </div>
+            <div class="app-command small"><span class="muted">command:</span> <code>{{ info.command }}</code></div>
+            {% endif %}
+          </td>
           <td><input type="checkbox" name="enabled.{{ app.name }}" aria-label="Enabled" {% if app.enabled %}checked{% endif %}></td>
           <td><input name="port.{{ app.name }}" value="{{ app.port }}" placeholder="{{ app.registry_port or '' }}"
                      inputmode="numeric" size="6" aria-label="Port"></td>
@@ -76,11 +82,12 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
     <p class="empty">No apps in the registry.</p>
     {% endif %}
   </fieldset>
 
-  <button type="submit">Save</button>
+  <p class="actions"><button type="submit">Save</button></p>
 </form>
 {% endblock %}

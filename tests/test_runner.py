@@ -46,7 +46,6 @@ def settings(tmp_path: Path) -> Settings:
         profiles=(Profile("example", "us-east-1"), Profile("example-dev", "eu-west-1")),
         default_profile="example",
         log_dir=str(tmp_path / "logs"),
-        theme="dark",
     )
 
 
@@ -100,7 +99,7 @@ def test_started_tool_gets_shared_settings_in_env(make_runner, load_launch, tmp_
     assert env["AWS_PROFILE"] == "example"
     assert env["AWS_REGION"] == "us-east-1"
     assert env["DADSOPS_LOG_DIR"] == str(tmp_path / "logs")
-    assert env["DADSOPS_THEME"] == "dark"
+    assert "DADSOPS_THEME" not in env
     assert env["PORT"] == "9123"
 
 
@@ -287,6 +286,39 @@ def test_missing_tool_path_is_not_started(make_runner, load_launch, fake_tool_en
 
     assert not result.ok
     assert result.message.startswith("not found at")
+
+
+def test_tool_without_path_starts_from_the_venv_in_the_home_dir(
+    make_runner, load_launch, lookup_dirs, make_executable, tmp_path
+):
+    marker = tmp_path / "tool_a.marker"
+    body = (
+        f"#!{sys.executable}\n"
+        "import json, os, sys, time\n"
+        f"open({str(marker)!r}, 'w').write(json.dumps({{'cwd': os.getcwd(), 'argv': sys.argv}}))\n"
+        "time.sleep(60)\n"
+    )
+    exe = make_executable(lookup_dirs["venv_bin"], "tool-a", body)
+    entry = {"name": "tool_a", "start_command": "tool-a --port {port}", "port": 9001}
+    runner = make_runner(probe=lambda _tool: marker.exists())
+
+    result = runner.start(load_launch(entry))
+
+    assert result.ok and result.started, result.message
+    seen = json.loads(marker.read_text())
+    assert Path(seen["cwd"]).resolve() == lookup_dirs["home"].resolve()
+    assert seen["argv"] == [str(exe), "--port", "9001"]
+
+
+def test_tool_without_path_and_missing_command_is_not_started(
+    make_runner, load_launch, lookup_dirs
+):
+    entry = {"name": "tool_a", "start_command": "tool-a --port {port}", "port": 9001}
+
+    result = make_runner(probe=lambda _tool: False).start(load_launch(entry))
+
+    assert not result.ok
+    assert result.message == "'tool-a' not found on PATH or in the DadsOps venv"
 
 
 def test_stop_kills_the_process_dadsops_started(make_runner, load_launch):

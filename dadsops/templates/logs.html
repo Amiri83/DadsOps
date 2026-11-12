@@ -7,8 +7,8 @@
 {% set tool = entry.launch.tool %}
 <section class="log" data-tool="{{ tool.name }}">
   <h2><a href="/logs/{{ tool.name }}">{{ tool.name }}</a>
-    {% if not entry.launch.enabled %}<span class="badge badge-disabled">disabled</span>{% endif %}</h2>
-  <p class="hint"><code>{{ entry.path }}</code></p>
+    {% if not entry.launch.enabled %}<span class="badge warn">disabled</span>{% endif %}</h2>
+  <p class="hint small"><code>{{ entry.path }}</code></p>
   {% if entry.lines %}
   <pre>{{ entry.lines | join("\n") }}</pre>
   {% else %}

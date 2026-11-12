@@ -44,7 +44,7 @@ packages = ["dadsops"]
 version = { attr = "dadsops.__version__" }
 
 [tool.setuptools.package-data]
-dadsops = ["templates/*.html", "static/*", "default_tools.yaml"]
+dadsops = ["templates/*.html", "static/*.*", "static/theme/*.css", "default_tools.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

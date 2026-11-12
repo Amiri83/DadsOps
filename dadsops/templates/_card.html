@@ -1,11 +1,12 @@
 {% set tool = card.tool %}
 {% set status = card.status %}
+{% set badge_class = {"installed": "ok", "not found": "err", "coming soon": "warn", "disabled": "warn"}[status] %}
 <article class="card status-{{ status | replace(' ', '-') }}" data-tool="{{ tool.name }}">
-  <svg class="icon" viewBox="0 0 32 32" aria-hidden="true">
-    <rect x="1" y="1" width="30" height="30" rx="7"></rect>
-    <text x="16" y="21" text-anchor="middle">{{ tool.name[0] }}</text>
-  </svg>
-  <div class="card-body">
+  <div class="card-head">
+    <svg class="icon" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="1" y="1" width="30" height="30" rx="7"></rect>
+      <text x="16" y="21" text-anchor="middle">{{ tool.name[0] }}</text>
+    </svg>
     {% if status == "installed" %}
     <form class="open" method="post" action="/open/{{ tool.name }}">
       <h2><button class="card-link" type="submit">{{ tool.name }}</button></h2>
@@ -13,16 +14,26 @@
     {% else %}
     <h2>{{ tool.name }}</h2>
     {% endif %}
-    {% if tool.description %}<p class="description">{{ tool.description }}</p>{% endif %}
-    <p class="meta">
-      <span class="badge badge-{{ status | replace(' ', '-') }}">{{ status }}</span>
-      {% if card.running %}<span class="badge badge-running">running on :{{ tool.port }}</span>{% endif %}
-    </p>
-    {% if card.error %}<p class="failure" role="alert">{{ card.error }}</p>{% endif %}
+  </div>
+  {% if tool.description %}<p class="description">{{ tool.description }}</p>{% endif %}
+  <p class="meta">
+    <span class="badge {{ badge_class }}">{{ status }}</span>
+    {% if card.running %}<span class="badge info">running on :{{ tool.port }}</span>{% endif %}
+  </p>
+  {% if not tool.coming_soon %}
+  <p class="found small muted" title="{{ card.location.detail }}">{{ card.location.label }}</p>
+  {% endif %}
+  {% if card.error %}<p class="failure" role="alert">{{ card.error }}</p>{% endif %}
+  {% if status == "installed" or card.owned %}
+  <div class="actions">
+    {% if status == "installed" %}
+    <span class="btn open-hint" aria-hidden="true">{% if card.running %}Open{% else %}Start{% endif %}</span>
+    {% endif %}
     {% if card.owned %}
     <form class="stop" method="post" action="/stop/{{ tool.name }}">
-      <button type="submit">Stop</button>
+      <button class="secondary" type="submit">Stop</button>
     </form>
     {% endif %}
   </div>
+  {% endif %}
 </article>

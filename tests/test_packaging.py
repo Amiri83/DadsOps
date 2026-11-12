@@ -34,6 +34,8 @@ def test_every_runtime_data_file_is_package_data():
     assert "templates/settings.html" in data_files
     assert "templates/logs.html" in data_files
     assert "static/style.css" in data_files
+    assert "static/theme/dadsops-theme.css" in data_files
+    assert "templates/error.html" in data_files
     missing = [f for f in data_files if not any(fnmatch(f, g) for g in globs)]
     assert missing == []
 

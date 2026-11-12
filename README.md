@@ -36,8 +36,11 @@ dadsops                        # same as `dadsops run`
 ```
 
 On first run the packaged default registry is copied to
-`~/.config/dadsops/tools.yaml`. Edit that copy to point the tools at your
-checkouts. It is never overwritten, not even by an upgrade.
+`~/.config/dadsops/tools.yaml`. It has no paths: each tool is the console
+script its own PyPI package installs (`ec2patcher`, `iplens`, `tflens serve`),
+so `pip install ec2patcher iplens tflens` next to DadsOps is all it takes. Edit
+the copy to change ports or to point a tool at a checkout (add `path:`). It is
+never overwritten, not even by an upgrade.
 
 Which registry is used, first match wins:
 
@@ -51,16 +54,35 @@ Which registry is used, first match wins:
 ```yaml
 tools:
   - name: EC2Patcher              # required; letters, digits, - and _ (used in URLs and log names)
-    path: ../EC2Patcher           # required; relative to tools.yaml, ~ allowed
+    path: ../EC2Patcher           # optional; a checkout, relative to tools.yaml, ~ allowed
     start_command: .venv/bin/python -m ec2patcher --port {port}   # required; string or list
     port: 8081                    # required; 1-65535, unique
     description: Patch EC2 servers from CVE lists   # optional
     health_path: /healthz         # optional; if set, "ready" = HTTP GET answers non-5xx
     coming_soon: false            # optional; shows the "coming soon" badge, never started
+
+  - name: IPLens                  # no path: a console script installed from PyPI
+    start_command: iplens --port {port}
+    port: 8082
 ```
 
-`start_command` runs in `path` as an argument list, never through a shell. A
-string is split like a shell would (`shlex.split`); a list is used as is.
+`start_command` runs as an argument list, never through a shell. A string is
+split like a shell would (`shlex.split`); a list is used as is.
+
+### With or without a path
+
+| Registry entry | Installed when                                              | Runs in        | Card shows           |
+|----------------|-------------------------------------------------------------|----------------|----------------------|
+| `path:` given  | the directory exists                                        | that directory | `found: ~/EC2Patcher` |
+| no `path:`     | the first word of `start_command` is on `PATH`              | your home dir  | `found on PATH`      |
+| no `path:`     | ...or is in the DadsOps venv's `bin/` (next to its Python)  | your home dir  | `found in venv`      |
+| either         | none of the above                                           | -              | `not found`          |
+
+A tool without a path is started with the full path of the executable it was
+found as, so a tool installed only in the DadsOps venv starts even when that
+venv is not on `PATH`. A tool that is not found shows **not found** and has no
+start button. The Settings page shows, per app, exactly where it was found and
+the resolved command it would run.
 
 ### Placeholders
 
@@ -80,8 +102,9 @@ single word (`{}`, `{"a": 1}`) are left alone. A command that uses `{profile}`
 or `{region}` while no AWS profile is configured is refused with that reason.
 
 Validation also rejects duplicate names or ports, missing required keys,
-unknown keys, a bad port and an empty command. If a tool's `path` does not
-exist, that is not an error: the tool just shows **not found**. If the registry
+unknown keys, a bad port, an empty `path` and an empty command. If a tool's
+`path` does not exist or its command is not installed, that is not an error:
+the tool just shows **not found**. If the registry
 can't be read or is invalid, every page shows the error instead of crashing.
 
 ## Settings (one place for all apps)
@@ -90,7 +113,6 @@ Stored in `~/.config/dadsops/config.yaml` (override with `DADSOPS_CONFIG`) and
 edited from the **Settings** page:
 
 ```yaml
-theme: light                              # light | dark
 log_dir: ~/.local/state/dadsops/logs      # the default
 profiles:                                 # exactly one marked default (if any are listed)
   - name: example
@@ -127,7 +149,9 @@ rejected when:
   `token`, `passw`, `access_key` or an AWS access key ID).
 
 Unknown keys are rejected too, so the file cannot hold credentials: only
-profile names, regions, ports, paths and plain arguments.
+profile names, regions, ports, paths and plain arguments. The one exception is
+`theme:`, written by older versions: it is ignored (there is only the dark
+theme now) and dropped the next time the settings are saved.
 
 ### What each tool receives
 
@@ -139,7 +163,32 @@ Environment variables, on top of DadsOps' own environment:
 | `AWS_PROFILE`     | the picked (or default) profile name, if any      |
 | `AWS_REGION`      | that profile's region, if any                     |
 | `DADSOPS_LOG_DIR` | the log directory                                 |
-| `DADSOPS_THEME`   | `light` or `dark`                                 |
+
+## Shared theme
+
+Every page (Home, Settings, Logs, error pages) uses one dark theme with one top
+menu (Home, Settings, Logs; the current page is highlighted). It lives in
+`dadsops/static/theme/dadsops-theme.css`, served at
+`/static/theme/dadsops-theme.css` and linked first on every page; DadsOps' own
+`static/style.css` comes after it and only adds layout, never colours or fonts.
+
+The theme is based on TFLens's look: its design tokens (CSS custom properties for
+colours, fonts, sizes, spacing, radius) plus the shared components: top menu
+(`.shell-header`), buttons, badges, tables, cards, forms and flash messages. It
+is plain CSS: no CDN, no `@import`, no web fonts, no image URLs.
+
+**This repo holds the master copy.** The other tools (EC2Patcher, IPLens,
+TFLens, RoleLens) copy the file **unchanged** into their own static files and
+link it before their app CSS; they do not fork or edit it. Tool-specific
+styling goes in the tool's own CSS, after the theme. The first line is a version
+comment:
+
+```css
+/* DadsOps shared theme v1 — master copy, tools copy this file unchanged */
+```
+
+Change the look here, bump `v1` to `v2` in that line, then copy the new file to
+each tool. A tool whose first line says an older version has an outdated copy.
 
 ## Logs
 

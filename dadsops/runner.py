@@ -114,7 +114,7 @@ class Runner:
         if not launch.enabled:
             return StartResult(ok=False, started=False, message="disabled in settings")
         if not tool.installed:
-            return StartResult(ok=False, started=False, message=f"not found at {tool.path}")
+            return StartResult(ok=False, started=False, message=tool.missing_reason())
         try:
             command = launch.command()
         except ConfigError as exc:
@@ -131,7 +131,7 @@ class Runner:
             try:
                 proc = subprocess.Popen(
                     command,
-                    cwd=tool.path,
+                    cwd=tool.workdir,
                     env=launch.env(),
                     stdin=subprocess.DEVNULL,
                     stdout=log,

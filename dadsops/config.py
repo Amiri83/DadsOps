@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -21,11 +22,12 @@ from dadsops.logs import log_file
 from dadsops.paths import DEFAULT_LOG_DIR
 from dadsops.registry import NAME_RE, Tool
 
-THEMES = ("light", "dark")
 PROFILE_RE = re.compile(r"^[A-Za-z0-9_.@+=,-]{1,64}$")
 REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-[0-9]$")
 SECRET_RE = re.compile(r"secret|token|passw|access[_-]?key|\b(AKIA|ASIA)[A-Z0-9]{16}\b", re.I)
-TOP_KEYS = {"theme", "log_dir", "profiles", "apps"}
+TOP_KEYS = {"log_dir", "profiles", "apps"}
+# Keys older versions wrote: still accepted so their files load, ignored, dropped on save.
+LEGACY_TOP_KEYS = {"theme"}
 PROFILE_KEYS = {"name", "region", "default"}
 APP_KEYS = {"port", "profile", "enabled", "extra_args"}
 
@@ -55,7 +57,6 @@ class Settings:
     profiles: tuple[Profile, ...] = ()
     default_profile: str | None = None
     log_dir: str = DEFAULT_LOG_DIR
-    theme: str = "light"
     apps: Mapping[str, AppSettings] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -71,8 +72,6 @@ class Settings:
 
 
 def _validate(settings: Settings) -> None:
-    if settings.theme not in THEMES:
-        raise ConfigError(f"theme must be one of: {', '.join(THEMES)}")
     if not isinstance(settings.log_dir, str) or not settings.log_dir.strip():
         raise ConfigError("log directory must be a non-empty path")
     if "\0" in settings.log_dir:
@@ -148,7 +147,7 @@ def load_settings(path: Path) -> Settings:
 def settings_from_dict(data: Any) -> Settings:
     if data is None:
         return Settings()
-    _require_mapping(data, "settings", TOP_KEYS)
+    _require_mapping(data, "settings", TOP_KEYS | LEGACY_TOP_KEYS)
 
     raw_profiles = data.get("profiles", [])
     if not isinstance(raw_profiles, list):
@@ -174,7 +173,6 @@ def settings_from_dict(data: Any) -> Settings:
         profiles=tuple(profiles),
         default_profile=defaults[0] if defaults else None,
         log_dir=data.get("log_dir", DEFAULT_LOG_DIR),
-        theme=data.get("theme", "light"),
         apps=apps,
     )
 
@@ -222,7 +220,6 @@ def settings_to_dict(settings: Settings) -> dict:
             entry["default"] = True
         profiles.append(entry)
     return {
-        "theme": settings.theme,
         "log_dir": settings.log_dir,
         "profiles": profiles,
         "apps": apps,
@@ -253,7 +250,6 @@ class Launch:
     enabled: bool
     profile: Profile | None
     log_dir: Path
-    theme: str
     extra_args: tuple[str, ...]
 
     @property
@@ -261,6 +257,8 @@ class Launch:
         return log_file(self.log_dir, self.tool.name)
 
     def command(self) -> tuple[str, ...]:
+        """The argv to run. A tool without a checkout runs the executable it was found as,
+        so a console script that is only in the DadsOps venv (not on PATH) still starts."""
         values = {"port": str(self.tool.port), "log_dir": str(self.log_dir)}
         if self.profile is not None:
             values.update(profile=self.profile.name, region=self.profile.region)
@@ -268,14 +266,25 @@ class Launch:
         if missing:
             used = ", ".join(f"{{{name}}}" for name in missing)
             raise ConfigError(f"start_command uses {used} but no AWS profile is configured")
-        return self.tool.command(values) + self.extra_args
+        command = self.tool.command(values)
+        if self.tool.path is None:
+            location = self.tool.locate()
+            if location.found:
+                command = (str(location.where), *command[1:])
+        return command + self.extra_args
+
+    def display_command(self) -> str:
+        """The resolved command as one shell-quoted line, or why it cannot be built yet."""
+        try:
+            return shlex.join(self.command())
+        except ConfigError as exc:
+            return f"{shlex.join(self.tool.start_command + self.extra_args)} ({exc})"
 
     def env(self, base: Mapping[str, str] | None = None) -> dict[str, str]:
-        """The parent environment plus PORT, the log dir, the theme and the AWS profile."""
+        """The parent environment plus PORT, the log dir and the AWS profile."""
         env = dict(os.environ if base is None else base)
         env["PORT"] = str(self.tool.port)
         env["DADSOPS_LOG_DIR"] = str(self.log_dir)
-        env["DADSOPS_THEME"] = self.theme
         if self.profile is not None:
             env["AWS_PROFILE"] = self.profile.name
             env["AWS_REGION"] = self.profile.region
@@ -300,7 +309,6 @@ def resolve(tools: list[Tool], settings: Settings) -> list[Launch]:
                 enabled=app.enabled,
                 profile=settings.profile(app.profile),
                 log_dir=log_dir,
-                theme=settings.theme,
                 extra_args=app.extra_args,
             )
         )
