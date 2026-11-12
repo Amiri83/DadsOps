@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,18 @@ from typing import Any
 import yaml
 
 REQUIRED_KEYS = ("name", "path", "start_command", "port")
-PORT_PLACEHOLDER = "{port}"
 OPTIONAL_KEYS = ("description", "health_path", "coming_soon")
+PLACEHOLDERS = ("port", "profile", "region", "log_dir")
+PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class RegistryError(ValueError):
     """The registry file is unreadable or invalid."""
+
+
+def placeholders_in(parts: tuple[str, ...] | list[str]) -> set[str]:
+    return {name for part in parts for name in PLACEHOLDER_RE.findall(part)}
 
 
 @dataclass(frozen=True)
@@ -30,10 +36,14 @@ class Tool:
     health_path: str | None = None
     coming_soon: bool = False
 
-    def command(self) -> tuple[str, ...]:
-        """start_command as run: every literal {port} replaced by the tool's port."""
-        port = str(self.port)
-        return tuple(part.replace(PORT_PLACEHOLDER, port) for part in self.start_command)
+    def placeholders(self) -> set[str]:
+        return placeholders_in(self.start_command)
+
+    def command(self, values: Mapping[str, str]) -> tuple[str, ...]:
+        """start_command with every {placeholder} replaced from values."""
+        return tuple(
+            PLACEHOLDER_RE.sub(lambda m: values[m.group(1)], part) for part in self.start_command
+        )
 
     @property
     def installed(self) -> bool:
@@ -128,6 +138,13 @@ def _parse_command(value: Any, where: str) -> tuple[str, ...]:
         raise RegistryError(f"{where}: start_command must be a string or a list of strings")
     if not parts or not all(part.strip() for part in parts):
         raise RegistryError(f"{where}: start_command must not be empty")
+    unknown = sorted(placeholders_in(parts) - set(PLACEHOLDERS))
+    if unknown:
+        known = ", ".join(f"{{{p}}}" for p in PLACEHOLDERS)
+        raise RegistryError(
+            f"{where}: unknown placeholder(s) in start_command: "
+            f"{', '.join(f'{{{p}}}' for p in unknown)} (known: {known})"
+        )
     return tuple(parts)
 
 

@@ -66,7 +66,7 @@ footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2
   border-radius: 10px;
 }
 .card.status-installed:hover { border-color: var(--accent); }
-.card.status-not-found, .card.status-coming-soon { opacity: 0.75; }
+.card.status-not-found, .card.status-coming-soon, .card.status-disabled { opacity: 0.75; }
 .card h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
 
 /* The whole card is the start/open button. */
@@ -98,15 +98,27 @@ footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2
 }
 .badge-installed, .badge-running { color: var(--ok); }
 .badge-not-found { color: var(--error); }
-.badge-coming-soon { color: var(--warn); }
+.badge-coming-soon, .badge-disabled { color: var(--warn); }
 
 .failure { color: var(--error); margin: 0.5rem 0 0; font-size: 0.9rem; }
 
 /* Keep the stop button clickable above the card-wide link. */
 .stop { position: relative; z-index: 1; margin-top: 0.6rem; }
 
-.settings { display: grid; gap: 0.9rem; max-width: 24rem; }
-.settings label { display: grid; gap: 0.3rem; font-weight: 600; }
+.settings { display: grid; gap: 1.2rem; }
+.settings fieldset {
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.settings legend { font-weight: 700; }
+.settings label { display: grid; gap: 0.3rem; font-weight: 600; max-width: 28rem; }
+.settings table { border-collapse: collapse; width: 100%; }
+.settings th { text-align: left; font-size: 0.85rem; color: var(--muted); padding: 0.3rem; }
+.settings td { padding: 0.3rem; }
+.settings td input:not([type]), .settings td select { width: 100%; box-sizing: border-box; }
 .settings input, .settings select {
   padding: 0.45rem;
   border: 1px solid var(--border);
@@ -114,6 +126,20 @@ footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2
   background: var(--card);
   color: var(--fg);
 }
+.settings > button { justify-self: start; }
+
+.log { margin-bottom: 1.5rem; }
+.log h2 { font-size: 1.1rem; margin-bottom: 0.2rem; }
+.log pre {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.empty { color: var(--muted); font-style: italic; }
 
 button {
   padding: 0.4rem 0.9rem;

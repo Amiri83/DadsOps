@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<h1>Logs</h1>
+<p class="hint">The last {{ tail_lines }} lines of each tool's output.</p>
+{% for entry in entries %}
+{% set tool = entry.launch.tool %}
+<section class="log" data-tool="{{ tool.name }}">
+  <h2><a href="/logs/{{ tool.name }}">{{ tool.name }}</a>
+    {% if not entry.launch.enabled %}<span class="badge badge-disabled">disabled</span>{% endif %}</h2>
+  <p class="hint"><code>{{ entry.path }}</code></p>
+  {% if entry.lines %}
+  <pre>{{ entry.lines | join("\n") }}</pre>
+  {% else %}
+  <p class="empty">No output yet: this log is created when DadsOps starts {{ tool.name }}.</p>
+  {% endif %}
+</section>
+{% else %}
+<p class="empty">No tools in the registry, so there are no logs to show.</p>
+{% endfor %}
+{% endblock %}
