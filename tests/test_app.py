@@ -8,6 +8,9 @@ from dadsops.app import create_app
 from dadsops.config import Settings, load_settings, save_settings
 from dadsops.runner import Runner, StartResult
 
+SAME_ORIGIN = {"origin": "http://testserver"}
+FORM = {"content-type": "application/x-www-form-urlencoded", **SAME_ORIGIN}
+
 
 class FakeRunner(Runner):
     """Records start/stop calls instead of spawning anything."""
@@ -73,8 +76,8 @@ def test_home_renders_one_card_per_tool_with_status(client):
     assert '<span class="badge badge-not-found">not found</span>' in page.text
     assert '<span class="badge badge-coming-soon">coming soon</span>' in page.text
     assert "Does A things." in page.text
-    assert 'href="/open/tool_a"' in page.text
-    assert 'href="/open/tool_b"' not in page.text
+    assert '<form class="open" method="post" action="/open/tool_a">' in page.text
+    assert 'action="/open/tool_b"' not in page.text
 
 
 def test_invalid_registry_shows_message_instead_of_crashing(config_file, fake_runner, tmp_path):
@@ -82,7 +85,7 @@ def test_invalid_registry_shows_message_instead_of_crashing(config_file, fake_ru
     broken.write_text("tools:\n  - name: tool_a\n")
     with TestClient(create_app(broken, config_file, runner=fake_runner)) as client:
         page = client.get("/")
-        opened = client.get("/open/tool_a", follow_redirects=False)
+        opened = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
     assert page.status_code == 200
     assert "Tool registry could not be loaded" in page.text
@@ -93,7 +96,7 @@ def test_invalid_registry_shows_message_instead_of_crashing(config_file, fake_ru
 def test_open_starts_tool_and_redirects_to_it(client, fake_runner, config_file):
     save_settings(Settings(aws_profile="example", theme="dark"), config_file)
 
-    response = client.get("/open/tool_a", follow_redirects=False)
+    response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "http://127.0.0.1:9001/"
@@ -103,7 +106,7 @@ def test_open_starts_tool_and_redirects_to_it(client, fake_runner, config_file):
 def test_open_failure_returns_home_with_reason(registry, config_file, tmp_path):
     runner = FakeRunner(tmp_path, StartResult(ok=False, started=False, message="did not answer"))
     with TestClient(create_app(registry, config_file, runner=runner)) as client:
-        response = client.get("/open/tool_a", follow_redirects=False)
+        response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
         page = client.get("/")
 
     assert response.headers["location"] == "/"
@@ -111,16 +114,51 @@ def test_open_failure_returns_home_with_reason(registry, config_file, tmp_path):
 
 
 def test_open_unknown_tool_is_404(client):
-    assert client.get("/open/nope", follow_redirects=False).status_code == 404
+    response = client.post("/open/nope", headers=SAME_ORIGIN, follow_redirects=False)
+    assert response.status_code == 404
+
+
+def test_open_accepts_same_origin_referer(client, fake_runner):
+    headers = {"referer": "http://testserver/"}
+
+    response = client.post("/open/tool_a", headers=headers, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert [name for name, _ in fake_runner.started] == ["tool_a"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"origin": "http://192.0.2.1"},
+        {"origin": "http://testserver.example"},
+        {"origin": "null"},
+        {"referer": "http://192.0.2.1/open/tool_a"},
+        {"origin": "http://192.0.2.1", "referer": "http://testserver/"},
+    ],
+)
+def test_open_rejects_missing_or_foreign_origin(client, fake_runner, headers):
+    response = client.post("/open/tool_a", headers=headers, follow_redirects=False)
+
+    assert response.status_code == 403
+    assert fake_runner.started == []
+
+
+def test_get_open_no_longer_starts_anything(client, fake_runner):
+    response = client.get("/open/tool_a", follow_redirects=False)
+
+    assert response.status_code == 405
+    assert fake_runner.started == []
 
 
 def test_stop_refuses_unowned_and_rejects_cross_origin(client):
-    response = client.post("/stop/tool_a", follow_redirects=False)
+    response = client.post("/stop/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
     assert response.status_code == 303
     assert "not started by DadsOps" in client.get("/").text
 
-    cross = client.post("/stop/tool_a", headers={"origin": "http://192.0.2.1"})
-    assert cross.status_code == 403
+    assert client.post("/stop/tool_a", headers={"origin": "http://192.0.2.1"}).status_code == 403
+    assert client.post("/stop/tool_a").status_code == 403
 
 
 def test_settings_page_saves_atomically_to_config(client, config_file):
@@ -129,7 +167,7 @@ def test_settings_page_saves_atomically_to_config(client, config_file):
     response = client.post(
         "/settings",
         content="aws_profile=example&aws_region=eu-central-1&theme=dark",
-        headers={"content-type": "application/x-www-form-urlencoded"},
+        headers=FORM,
         follow_redirects=False,
     )
 
@@ -142,7 +180,7 @@ def test_settings_page_rejects_invalid_values(client, config_file):
     response = client.post(
         "/settings",
         content="aws_profile=bad+profile&aws_region=us-east-1&theme=light",
-        headers={"content-type": "application/x-www-form-urlencoded"},
+        headers=FORM,
     )
 
     assert response.status_code == 400

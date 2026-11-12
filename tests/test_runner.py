@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -17,7 +18,7 @@ SETTINGS = Settings(aws_profile="example", aws_region="us-east-1", theme="dark")
 
 
 def marker_of(tool) -> Path:
-    return Path(tool.start_command[-1])
+    return Path(tool.start_command[3])
 
 
 def pid_alive(pid: int) -> bool:
@@ -91,6 +92,30 @@ def test_started_tool_gets_shared_settings_in_env(make_runner, load_tool):
     assert env["AWS_REGION"] == "us-east-1"
     assert env["DADSOPS_THEME"] == "dark"
     assert env["PORT"] == "9123"
+
+
+def test_port_placeholder_reaches_the_child_process(make_runner, write_registry, fake_tool_entry):
+    entry = fake_tool_entry(port=9124)
+    entry["start_command"] += ["--port", "{port}", "--bind=127.0.0.1:{port}"]
+    (tool,) = load_registry(write_registry([entry]))
+
+    assert make_runner().start(tool, SETTINGS).ok
+
+    argv = json.loads(marker_of(tool).read_text())["argv"]
+    assert argv[2:] == ["--port", "9124", "--bind=127.0.0.1:9124"]
+
+
+def test_string_command_with_placeholder_reaches_the_child_process(
+    make_runner, write_registry, fake_tool_entry
+):
+    entry = fake_tool_entry(port=9125)
+    entry["start_command"] = shlex.join(entry["start_command"]) + " --port {port}"
+    (tool,) = load_registry(write_registry([entry]))
+
+    assert make_runner().start(tool, SETTINGS).ok
+
+    argv = json.loads(marker_of(tool).read_text())["argv"]
+    assert argv[2:] == ["--port", "9125"]
 
 
 def test_no_second_process_when_port_already_open(make_runner, load_tool, monkeypatch):

@@ -2,12 +2,12 @@ tools:
   - name: tool_a
     description: First example tool.
     path: tool_a
-    start_command: .venv/bin/python -m tool_a
+    start_command: .venv/bin/python -m tool_a --port {port}
     port: 9001
     health_path: /healthz
   - name: tool_b
     path: missing_tool_b
-    start_command: [./run.sh, --flag]
+    start_command: [./run.sh, --flag, "--listen=127.0.0.1:{port}"]
     port: 9002
   - name: tool_c
     path: tool_c

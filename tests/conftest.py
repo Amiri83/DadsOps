@@ -10,7 +10,7 @@ STUB_SOURCE = textwrap.dedent(
     import json, os, sys, time
     mode, marker = sys.argv[1], sys.argv[2]
     with open(marker + ".tmp", "w") as fh:
-        json.dump({"pid": os.getpid(), "env": dict(os.environ)}, fh)
+        json.dump({"pid": os.getpid(), "argv": sys.argv[1:], "env": dict(os.environ)}, fh)
     os.replace(marker + ".tmp", marker)
     if mode == "fail":
         print("boom: stub refused to start", flush=True)
@@ -22,7 +22,7 @@ STUB_SOURCE = textwrap.dedent(
 
 @pytest.fixture
 def stub_script(tmp_path: Path) -> Path:
-    """A fake tool: records its pid + env to a marker file, then sleeps (or fails)."""
+    """A fake tool: records its pid, args + env to a marker file, then sleeps (or fails)."""
     script = tmp_path / "stub_tool.py"
     script.write_text(STUB_SOURCE)
     return script
