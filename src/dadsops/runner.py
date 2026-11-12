@@ -1,0 +1,166 @@
+"""Start, stop and check the tool processes.
+
+A tool counts as running when its port answers (or its health path responds) or
+when DadsOps holds a live process for it. Stop only ever signals processes this
+runner spawned itself, never whatever else happens to hold the port.
+"""
+
+from __future__ import annotations
+
+import http.client
+import os
+import signal
+import socket
+import subprocess
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+from dadsops.config import Settings, child_env
+from dadsops.registry import Tool
+
+HOST = "127.0.0.1"
+
+
+def port_open(port: int, host: str = HOST, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def is_ready(tool: Tool, timeout: float = 0.5) -> bool:
+    """TCP check, or an HTTP GET of health_path (any non-5xx answer) when one is set."""
+    if tool.health_path is None:
+        return port_open(tool.port, timeout=timeout)
+    conn = http.client.HTTPConnection(HOST, tool.port, timeout=timeout)
+    try:
+        conn.request("GET", tool.health_path)
+        return conn.getresponse().status < 500
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        conn.close()
+
+
+@dataclass(frozen=True)
+class StartResult:
+    ok: bool
+    started: bool
+    message: str
+
+
+class Runner:
+    def __init__(
+        self,
+        log_dir: Path,
+        probe: Callable[[Tool], bool] = is_ready,
+        start_timeout: float = 30.0,
+        poll_interval: float = 0.2,
+    ) -> None:
+        self.log_dir = Path(log_dir)
+        self.start_timeout = start_timeout
+        self.poll_interval = poll_interval
+        self.errors: dict[str, str] = {}
+        self._probe = probe
+        self._procs: dict[str, subprocess.Popen] = {}
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def owns(self, name: str) -> bool:
+        proc = self._procs.get(name)
+        return proc is not None and proc.poll() is None
+
+    def is_running(self, tool: Tool) -> bool:
+        return self.owns(tool.name) or self._probe(tool)
+
+    def start(self, tool: Tool, settings: Settings) -> StartResult:
+        with self._lock(tool.name):
+            result = self._start(tool, settings)
+        if result.ok:
+            self.errors.pop(tool.name, None)
+        else:
+            self.errors[tool.name] = result.message
+        return result
+
+    def stop(self, tool: Tool) -> bool:
+        with self._lock(tool.name):
+            if not self.owns(tool.name):
+                self._procs.pop(tool.name, None)
+                self.errors[tool.name] = "not started by DadsOps, left running"
+                return False
+            self._terminate(tool.name)
+        self.errors.pop(tool.name, None)
+        return True
+
+    def stop_all(self) -> None:
+        for name in list(self._procs):
+            with self._lock(name):
+                if name in self._procs:
+                    self._terminate(name)
+
+    def _lock(self, name: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(name, threading.Lock())
+
+    def _start(self, tool: Tool, settings: Settings) -> StartResult:
+        if self.is_running(tool):
+            return StartResult(ok=True, started=False, message="already running")
+        if tool.coming_soon:
+            return StartResult(ok=False, started=False, message="coming soon")
+        if not tool.installed:
+            return StartResult(ok=False, started=False, message=f"not found at {tool.path}")
+
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = self.log_dir / f"{tool.name}.log"
+        with log_path.open("wb") as log:
+            try:
+                proc = subprocess.Popen(
+                    tool.start_command,
+                    cwd=tool.path,
+                    env=child_env(settings, tool.port),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                reason = f"command failed: {exc.strerror or exc}"
+                return StartResult(ok=False, started=False, message=reason)
+        self._procs[tool.name] = proc
+
+        deadline = time.monotonic() + self.start_timeout
+        while time.monotonic() < deadline:
+            if self._probe(tool):
+                return StartResult(ok=True, started=True, message=f"started (pid {proc.pid})")
+            code = proc.poll()
+            if code is not None:
+                del self._procs[tool.name]
+                reason = f"command exited with code {code}{_last_line(log_path)}"
+                return StartResult(ok=False, started=False, message=reason)
+            time.sleep(self.poll_interval)
+
+        self._terminate(tool.name)
+        reason = f"did not answer on port {tool.port} within {self.start_timeout:g}s"
+        return StartResult(ok=False, started=False, message=reason)
+
+    def _terminate(self, name: str, grace: float = 5.0) -> None:
+        proc = self._procs.pop(name)
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(grace)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+        except ProcessLookupError:
+            proc.wait()
+
+
+def _last_line(log_path: Path) -> str:
+    lines = log_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+    return f": {lines[-1][:200]}" if lines else ""

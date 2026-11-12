@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Tools</h1>
+{% if registry_error %}
+<p class="banner banner-error" role="alert">Tool registry could not be loaded: {{ registry_error }}</p>
+{% endif %}
+<section class="cards">
+  {% for card in cards %}
+  {% include "_card.html" %}
+  {% endfor %}
+</section>
+{% endblock %}

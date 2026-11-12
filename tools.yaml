@@ -1,0 +1,27 @@
+# DadsOps tool registry. Paths are relative to this file.
+# Each tool gets PORT, AWS_PROFILE, AWS_REGION and DADSOPS_THEME in its environment.
+tools:
+  - name: EC2Patcher
+    description: Patch status and maintenance windows for EC2 instances.
+    path: ../EC2Patcher
+    start_command: .venv/bin/python -m ec2patcher
+    port: 8081
+
+  - name: IPLens
+    description: Who owns which IP address across VPCs and accounts.
+    path: ../IPLens
+    start_command: .venv/bin/python -m iplens
+    port: 8082
+
+  - name: TFLens
+    description: Terraform state and drift overview.
+    path: ../TFLens
+    start_command: .venv/bin/python -m tflens
+    port: 8083
+
+  - name: RoleLens
+    description: IAM roles, trust policies and who can assume what.
+    path: ../RoleLens
+    start_command: .venv/bin/python -m rolelens
+    port: 8084
+    coming_soon: true
