@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 REQUIRED_KEYS = ("name", "path", "start_command", "port")
+PORT_PLACEHOLDER = "{port}"
 OPTIONAL_KEYS = ("description", "health_path", "coming_soon")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -28,6 +29,11 @@ class Tool:
     description: str = ""
     health_path: str | None = None
     coming_soon: bool = False
+
+    def command(self) -> tuple[str, ...]:
+        """start_command as run: every literal {port} replaced by the tool's port."""
+        port = str(self.port)
+        return tuple(part.replace(PORT_PLACEHOLDER, port) for part in self.start_command)
 
     @property
     def installed(self) -> bool:

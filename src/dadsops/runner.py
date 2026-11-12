@@ -119,7 +119,7 @@ class Runner:
         with log_path.open("wb") as log:
             try:
                 proc = subprocess.Popen(
-                    tool.start_command,
+                    tool.command(),
                     cwd=tool.path,
                     env=child_env(settings, tool.port),
                     stdin=subprocess.DEVNULL,

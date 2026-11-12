@@ -2,7 +2,7 @@
 
 A small local web launcher for the sibling AWS portfolio tools (EC2Patcher,
 IPLens, TFLens, RoleLens). It shows one card per tool with a live status badge.
-Click a card and DadsOps starts that tool if it is not running yet, waits for its
+Click a card (a plain form POST, no JavaScript needed) and DadsOps starts that tool if it is not running yet, waits for its
 port to answer, then opens it in the same browser tab.
 
 DadsOps is **read-only toward AWS**. It never calls an AWS API and never stores
@@ -32,12 +32,20 @@ PYTHONPATH=src python3 -m dadsops install   # first time: create/reuse .venv, in
 tools:
   - name: EC2Patcher              # required; letters, digits, - and _ (used in URLs)
     path: ../EC2Patcher           # required; relative to tools.yaml, ~ allowed
-    start_command: .venv/bin/python -m ec2patcher   # required; string or list, run in `path`
+    start_command: .venv/bin/python -m ec2patcher --port {port}   # required; string or list
     port: 8081                    # required; 1-65535, unique
-    description: Patch status...  # optional
+    description: Patch EC2 servers from CVE lists   # optional
     health_path: /healthz         # optional; if set, "ready" = HTTP GET answers non-5xx
     coming_soon: false            # optional; shows the "coming soon" badge, never started
 ```
+
+`start_command` runs in `path` as an argument list, never through a shell. A
+string is split like a shell would (`shlex.split`); a list is used as is. Every
+literal `{port}` in any argument is replaced with the tool's own `port` when the
+tool is started, so `--port {port}` becomes `--port 8081` and
+`--listen=127.0.0.1:{port}` becomes `--listen=127.0.0.1:8081`. Nothing else in
+the arguments is changed (other braces are left alone). The tools take `--port`;
+the `PORT` environment variable is still set for those that read it.
 
 Validation rejects duplicate names or ports, missing required keys, unknown
 keys, a bad port and an empty command. If a tool's `path` does not exist, that
@@ -50,7 +58,7 @@ flagged, otherwise `installed` when `path` exists, otherwise `not found`. A
 
 ## Starting and stopping
 
-- `GET /open/<tool>` starts the tool if needed and redirects to
+- `POST /open/<tool>` (the card's form) starts the tool if needed and redirects to
   `http://127.0.0.1:<port>/`. If the port already answers, or DadsOps already
   holds a live process for the tool, it only redirects. A start waits up to 30s
   for the port. If it times out, the process is stopped and the card shows why.
@@ -60,6 +68,11 @@ flagged, otherwise `installed` when `path` exists, otherwise `not found`. A
   (its process group gets SIGTERM, then SIGKILL after 5s). A process DadsOps did
   not start is left alone, even if it holds the tool's port. When DadsOps shuts
   down, it stops every tool it started.
+- Every `POST` (`/open`, `/stop`, `/settings`) must come from the DadsOps page
+  itself: its `Origin` header (or `Referer`, if there is no `Origin`) has to
+  match the server's host. Otherwise it gets `403`, and so does a request with
+  neither header. `GET /open/<tool>` no longer exists (`405`), so a link
+  or an embedded image elsewhere cannot start a tool.
 
 ## Shared settings
 
@@ -80,7 +93,11 @@ not forwarded.
 
 ## Development
 
+Install the project with its test and lint tools (pytest, httpx, ruff) into the
+venv, then run the checks:
+
 ```bash
+.venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```

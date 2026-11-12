@@ -6,13 +6,13 @@
     <text x="16" y="21" text-anchor="middle">{{ tool.name[0] }}</text>
   </svg>
   <div class="card-body">
-    <h2>
-      {% if status == "installed" %}
-      <a class="card-link" href="/open/{{ tool.name }}">{{ tool.name }}</a>
-      {% else %}
-      {{ tool.name }}
-      {% endif %}
-    </h2>
+    {% if status == "installed" %}
+    <form class="open" method="post" action="/open/{{ tool.name }}">
+      <h2><button class="card-link" type="submit">{{ tool.name }}</button></h2>
+    </form>
+    {% else %}
+    <h2>{{ tool.name }}</h2>
+    {% endif %}
     {% if tool.description %}<p class="description">{{ tool.description }}</p>{% endif %}
     <p class="meta">
       <span class="badge badge-{{ status | replace(' ', '-') }}">{{ status }}</span>

@@ -58,8 +58,9 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         return RedirectResponse("/", status_code=303)
 
     def require_same_origin(request: Request) -> None:
-        origin = request.headers.get("origin")
-        if origin and urlsplit(origin).netloc != request.headers.get("host"):
+        """Refuse a POST unless its Origin (or, failing that, Referer) is this server."""
+        source = request.headers.get("origin") or request.headers.get("referer")
+        if not source or urlsplit(source).netloc != request.headers.get("host"):
             raise HTTPException(status_code=403, detail="cross-origin request refused")
 
     @app.get("/", response_class=HTMLResponse)
@@ -79,8 +80,9 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         ]
         return render(request, "home.html", cards=cards, registry_error=registry_error)
 
-    @app.get("/open/{name}")
-    def open_tool(name: str) -> RedirectResponse:
+    @app.post("/open/{name}")
+    def open_tool(name: str, request: Request) -> RedirectResponse:
+        require_same_origin(request)
         tool = find_tool(name)
         if tool is None:
             return home_redirect()

@@ -22,12 +22,48 @@ def test_loads_all_fields(valid_registry: Path):
     assert tool_a.name == "tool_a"
     assert tool_a.description == "First example tool."
     assert tool_a.path == valid_registry.parent / "tool_a"
-    assert tool_a.start_command == (".venv/bin/python", "-m", "tool_a")
+    assert tool_a.start_command == (".venv/bin/python", "-m", "tool_a", "--port", "{port}")
     assert tool_a.port == 9001
     assert tool_a.health_path == "/healthz"
-    assert tool_b.start_command == ("./run.sh", "--flag")
+    assert tool_b.start_command == ("./run.sh", "--flag", "--listen=127.0.0.1:{port}")
     assert tool_b.health_path is None
     assert tool_c.coming_soon is True
+
+
+def test_port_placeholder_is_substituted_in_string_and_list_commands(valid_registry: Path):
+    tool_a, tool_b, tool_c = load_registry(valid_registry)
+
+    assert tool_a.command() == (".venv/bin/python", "-m", "tool_a", "--port", "9001")
+    assert tool_b.command() == ("./run.sh", "--flag", "--listen=127.0.0.1:9002")
+    assert tool_c.command() == ("./run.sh",)
+
+
+def test_port_substitution_is_exact_and_leaves_other_text_alone(write_registry):
+    command = ["run", "{port}{port}", "{ports}", "{Port}", "{other}", "{{port}}", "a b"]
+    (tool,) = load_registry(write_registry([base_entry(start_command=command)]))
+
+    assert tool.command() == ("run", "90019001", "{ports}", "{Port}", "{other}", "{9001}", "a b")
+    assert not any("{port}" in part for part in tool.command())
+
+
+def test_repo_registry_loads(tmp_path: Path):
+    path = tmp_path / "tools.yaml"
+    shutil.copy(Path(__file__).parents[1] / "tools.yaml", path)
+
+    tools = {tool.name: tool for tool in load_registry(path)}
+
+    assert {name: tool.port for name, tool in tools.items()} == {
+        "EC2Patcher": 8081,
+        "IPLens": 8082,
+        "TFLens": 8083,
+        "RoleLens": 8084,
+    }
+    assert tools["TFLens"].path == (tmp_path.parent / "tflens").resolve()
+    assert tools["TFLens"].description == "Explain Terraform repos: resources, access, code refs"
+    assert tools["TFLens"].command()[-3:] == ("serve", "--port", "8083")
+    for tool in tools.values():
+        assert tool.command()[-2:] == ("--port", str(tool.port))
+        assert not any("{port}" in part for part in tool.command())
 
 
 def test_status_comes_from_the_filesystem(valid_registry: Path):

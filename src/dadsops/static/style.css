@@ -69,8 +69,16 @@ footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2
 .card.status-not-found, .card.status-coming-soon { opacity: 0.75; }
 .card h2 { margin: 0 0 0.3rem; font-size: 1.15rem; }
 
-/* The whole card is the start/open link. */
-.card-link { text-decoration: none; }
+/* The whole card is the start/open button. */
+.card-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .card-link::after { content: ""; position: absolute; inset: 0; }
 .card.is-starting { cursor: progress; }
 .card.is-starting .card-link::before { content: "Starting… "; color: var(--muted); }
