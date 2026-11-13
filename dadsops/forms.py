@@ -22,7 +22,6 @@ Form = dict[str, list[str]]
 def form_values(settings: Settings, tools: list[Tool]) -> dict:
     """What the settings page shows for the saved settings."""
     return {
-        "theme": settings.theme,
         "log_dir": settings.log_dir,
         "profiles": [
             {"name": p.name, "region": p.region, "default": p.name == settings.default_profile}
@@ -72,7 +71,6 @@ def read_form(form: Form, tools: list[Tool]) -> dict:
         for name in form.get("app", [])
     ]
     return {
-        "theme": first("theme", "light"),
         "log_dir": first("log_dir").strip(),
         "profiles": profiles,
         "apps": apps,
@@ -100,7 +98,6 @@ def settings_from_form(values: dict, current: Settings) -> Settings:
         profiles=profiles,
         default_profile=defaults[0] if defaults else None,
         log_dir=values["log_dir"],
-        theme=values["theme"],
         apps=apps,
     )
 

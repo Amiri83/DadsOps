@@ -1,6 +1,7 @@
 # DadsOps tool registry for a source checkout. Paths are relative to this file.
 # Placeholders in start_command: {port} {profile} {region} {log_dir}.
-# Each tool gets PORT, AWS_PROFILE, AWS_REGION, DADSOPS_LOG_DIR and DADSOPS_THEME in its env.
+# Each tool gets PORT, AWS_PROFILE, AWS_REGION and DADSOPS_LOG_DIR in its env.
+# Leave out `path` to use a console script from PATH or the DadsOps venv instead.
 # Per-app port, profile, enabled and extra args are set on the Settings page and win over this file.
 tools:
   - name: EC2Patcher

@@ -12,9 +12,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dadsops.config import (
-    THEMES,
     ConfigError,
     Launch,
     Settings,
@@ -84,12 +84,19 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         request: Request, template: str, state: State, status_code: int = 200, **context
     ) -> Response:
         context = {
-            "theme": state.settings.theme,
             "settings_error": state.settings_error,
             "registry_error": state.registry_error,
             **context,
         }
         return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def error_page(request: Request, exc: StarletteHTTPException) -> Response:
+        """Errors render as a themed page; the detail never includes file contents."""
+        context = {"status_code": exc.status_code, "detail": exc.detail, "active": None}
+        return templates.TemplateResponse(
+            request, "error.html", context, status_code=exc.status_code, headers=exc.headers
+        )
 
     def home_redirect() -> RedirectResponse:
         return RedirectResponse("/", status_code=303)
@@ -106,19 +113,24 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         cards = []
         for launch in state.launches.values():
             tool = launch.tool
-            status = tool.status
-            if status == "installed" and not launch.enabled:
-                status = "disabled"
+            location = tool.locate()
+            if tool.coming_soon:
+                status = "coming soon"
+            elif not location.found:
+                status = "not found"
+            else:
+                status = "installed" if launch.enabled else "disabled"
             cards.append(
                 {
                     "tool": tool,
                     "status": status,
-                    "running": tool.installed and runner.is_running(tool),
+                    "location": location,
+                    "running": location.found and runner.is_running(tool),
                     "owned": runner.owns(tool.name),
                     "error": runner.errors.get(tool.name),
                 }
             )
-        return render(request, "home.html", state, cards=cards)
+        return render(request, "home.html", state, active="home", cards=cards)
 
     @app.post("/open/{name}")
     def open_tool(name: str, request: Request) -> RedirectResponse:
@@ -154,8 +166,12 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
             "settings.html",
             state,
             status_code=400 if form_error else 200,
+            active="settings",
             form=values,
-            themes=THEMES,
+            found={
+                name: {"location": launch.tool.locate(), "command": launch.display_command()}
+                for name, launch in state.launches.items()
+            },
             config_path=config_path,
             saved=saved,
             form_error=form_error,
@@ -188,7 +204,9 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
     def logs_page(request: Request) -> Response:
         state = load_state()
         entries = [log_entry(launch) for launch in state.launches.values()]
-        return render(request, "logs.html", state, entries=entries, tail_lines=TAIL_LINES)
+        return render(
+            request, "logs.html", state, active="logs", entries=entries, tail_lines=TAIL_LINES
+        )
 
     @app.get("/logs/{name}", response_class=HTMLResponse)
     def tool_log_page(name: str, request: Request) -> Response:
@@ -200,6 +218,8 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         if name not in state.launches:
             raise HTTPException(status_code=404, detail=f"unknown tool: {name}")
         entries = [log_entry(state.launches[name])]
-        return render(request, "logs.html", state, entries=entries, tail_lines=TAIL_LINES)
+        return render(
+            request, "logs.html", state, active="logs", entries=entries, tail_lines=TAIL_LINES
+        )
 
     return app

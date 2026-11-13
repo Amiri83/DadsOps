@@ -1,8 +1,12 @@
+import os
 import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
+from dadsops import registry as registry_module
+from dadsops.config import Profile, Settings, resolve
 from dadsops.paths import DEFAULT_REGISTRY
 from dadsops.registry import RegistryError, load_registry
 
@@ -91,13 +95,31 @@ def test_repo_registry_loads(tmp_path: Path):
 
 def test_packaged_default_lists_the_same_tools_as_the_checkout_registry():
     def summary(path: Path) -> list[tuple]:
-        return [
-            (t.name, t.port, t.start_command, t.description, t.coming_soon)
-            for t in load_registry(path)
-        ]
+        return [(t.name, t.port, t.description, t.coming_soon) for t in load_registry(path)]
 
     assert summary(DEFAULT_REGISTRY) == summary(REPO_REGISTRY)
-    assert all(tool.path.is_absolute() for tool in load_registry(DEFAULT_REGISTRY))
+    assert all(tool.path is not None for tool in load_registry(REPO_REGISTRY))
+
+
+def test_packaged_default_uses_console_scripts_and_no_paths():
+    raw = yaml.safe_load(DEFAULT_REGISTRY.read_text())
+    assert all("path" not in entry for entry in raw["tools"])
+
+    tools = {tool.name: tool for tool in load_registry(DEFAULT_REGISTRY)}
+
+    assert all(tool.path is None for tool in tools.values())
+    assert {name: " ".join(t.start_command) for name, t in tools.items() if not t.coming_soon} == {
+        "EC2Patcher": "ec2patcher --port {port}",
+        "IPLens": "iplens --port {port}",
+        "TFLens": "tflens serve --port {port}",
+    }
+    assert {name: tool.port for name, tool in tools.items()} == {
+        "EC2Patcher": 8081,
+        "IPLens": 8082,
+        "TFLens": 8083,
+        "RoleLens": 8084,
+    }
+    assert tools["RoleLens"].coming_soon is True
 
 
 def test_status_comes_from_the_filesystem(valid_registry: Path):
@@ -123,7 +145,6 @@ def base_entry(**overrides) -> dict:
         ([base_entry(), base_entry(port=9002)], "duplicate name"),
         ([base_entry(), base_entry(name="tool_b")], "duplicate port"),
         ([base_entry(name=None)], "missing required key(s): name"),
-        ([base_entry(path=None)], "missing required key(s): path"),
         ([base_entry(start_command=None)], "missing required key(s): start_command"),
         ([base_entry(port=None)], "missing required key(s): port"),
         ([base_entry(port=0)], "port must be"),
@@ -137,6 +158,8 @@ def base_entry(**overrides) -> dict:
         ([base_entry(name="tool a")], "name must use only"),
         ([base_entry(name="../tool_a")], "name must use only"),
         ([base_entry(path="")], "path must be"),
+        ([base_entry(path="  ")], "path must be"),
+        ([base_entry(path=5)], "path must be"),
         ([base_entry(health_path="healthz")], "health_path must start"),
         ([base_entry(coming_soon="yes")], "coming_soon must be"),
         ([base_entry(colour="red")], "unknown key(s): colour"),
@@ -170,3 +193,142 @@ def test_missing_file_is_a_registry_error(tmp_path: Path):
 def test_missing_tool_path_is_not_an_error(write_registry):
     (tool,) = load_registry(write_registry([base_entry(path="does_not_exist")]))
     assert tool.status == "not found"
+
+
+# ---------------------------------------------------------------- tools without a path
+
+
+def test_entry_with_existing_path_is_installed_from_the_checkout(
+    write_registry, tool_dirs, lookup_dirs
+):
+    (tool,) = load_registry(write_registry([base_entry(path=str(tool_dirs["tool_a"]))]))
+
+    location = tool.locate()
+    assert tool.status == "installed"
+    assert (location.kind, location.where) == ("checkout", tool_dirs["tool_a"])
+    assert location.label == f"found: {tool_dirs['tool_a']}"
+    assert tool.workdir == tool_dirs["tool_a"]
+
+
+def test_entry_with_missing_path_is_not_found_even_if_the_command_exists(
+    write_registry, lookup_dirs, make_executable, tmp_path
+):
+    make_executable(lookup_dirs["path_bin"], "tool-a")
+    entry = base_entry(path=str(tmp_path / "nowhere"), start_command="tool-a")
+    (tool,) = load_registry(write_registry([entry]))
+
+    assert tool.status == "not found"
+    assert tool.locate().label == "not found"
+    assert tool.missing_reason() == f"not found at {tmp_path / 'nowhere'}"
+
+
+def test_checkout_under_home_is_shown_with_a_tilde(write_registry, lookup_dirs):
+    checkout = lookup_dirs["home"] / "ToolA"
+    checkout.mkdir()
+    (tool,) = load_registry(write_registry([base_entry(path="~/ToolA")]))
+
+    assert tool.path == checkout
+    assert tool.locate().label == "found: ~/ToolA"
+
+
+def test_no_path_and_command_on_path_is_installed(write_registry, lookup_dirs, make_executable):
+    exe = make_executable(lookup_dirs["path_bin"], "tool-a")
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    location = tool.locate()
+    assert tool.path is None
+    assert tool.status == "installed"
+    assert (location.kind, location.where) == ("path", exe)
+    assert location.label == "found on PATH"
+    assert location.detail == f"on PATH: {exe}"
+
+
+def test_no_path_and_command_only_in_the_venv_is_installed(
+    write_registry, lookup_dirs, make_executable
+):
+    exe = make_executable(lookup_dirs["venv_bin"], "tool-a")
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    location = tool.locate()
+    assert tool.status == "installed"
+    assert (location.kind, location.where) == ("venv", exe)
+    assert location.label == "found in venv"
+    assert location.detail == f"in the DadsOps venv: {exe}"
+
+
+def test_command_on_path_inside_the_venv_bin_is_reported_as_venv(
+    write_registry, lookup_dirs, make_executable, monkeypatch
+):
+    make_executable(lookup_dirs["venv_bin"], "tool-a")
+    monkeypatch.setenv("PATH", os.pathsep.join(map(str, lookup_dirs.values())))
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    assert tool.locate().kind == "venv"
+
+
+def test_no_path_and_command_missing_is_not_found(write_registry, lookup_dirs, make_executable):
+    make_executable(lookup_dirs["path_bin"], "tool-b")
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    assert tool.status == "not found"
+    assert not tool.installed
+    assert tool.locate().label == "not found"
+    assert tool.missing_reason() == "'tool-a' not found on PATH or in the DadsOps venv"
+
+
+def test_non_executable_file_on_path_is_not_found(write_registry, lookup_dirs):
+    (lookup_dirs["path_bin"] / "tool-a").write_text("not executable")
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    assert tool.status == "not found"
+
+
+def test_coming_soon_wins_over_location(write_registry, lookup_dirs, make_executable):
+    make_executable(lookup_dirs["path_bin"], "tool-a")
+    entry = base_entry(path=None, start_command="tool-a", coming_soon=True)
+    (tool,) = load_registry(write_registry([entry]))
+
+    assert tool.status == "coming soon"
+
+
+def test_no_path_placeholders_are_substituted_and_workdir_is_home(
+    write_registry, lookup_dirs, make_executable
+):
+    exe = make_executable(lookup_dirs["venv_bin"], "tool-a")
+    command = "tool-a serve --port {port} --profile {profile} --region {region} --logs {log_dir}"
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command=command)]))
+    settings = Settings(
+        profiles=(Profile("example", "eu-west-1"),),
+        default_profile="example",
+        log_dir="/var/tmp/dadsops-logs",
+    )
+    (launch,) = resolve([tool], settings)
+
+    assert tool.command(VALUES)[:4] == ("tool-a", "serve", "--port", "9001")
+    assert launch.command() == (
+        str(exe),
+        "serve",
+        "--port",
+        "9001",
+        "--profile",
+        "example",
+        "--region",
+        "eu-west-1",
+        "--logs",
+        "/var/tmp/dadsops-logs",
+    )
+    assert launch.display_command().startswith(f"{exe} serve --port 9001")
+    assert tool.workdir == lookup_dirs["home"]
+    assert tool.workdir == Path(os.path.expanduser("~"))
+
+
+def test_no_path_command_that_is_not_found_keeps_its_name(write_registry, lookup_dirs):
+    entry = base_entry(path=None, start_command="tool-a --port {port}")
+    (tool,) = load_registry(write_registry([entry]))
+    (launch,) = resolve([tool], Settings())
+
+    assert launch.command() == ("tool-a", "--port", "9001")
+
+
+def test_registry_module_defaults_to_the_running_interpreters_bin():
+    assert Path(registry_module.VENV_BIN) == Path(registry_module.sys.executable).parent

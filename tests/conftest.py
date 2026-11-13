@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from dadsops import registry as registry_module
+
 STUB_SOURCE = textwrap.dedent(
     """
     import json, os, sys, time
@@ -18,6 +20,30 @@ STUB_SOURCE = textwrap.dedent(
     time.sleep(60)
     """
 )
+
+
+@pytest.fixture
+def lookup_dirs(tmp_path: Path, monkeypatch) -> dict[str, Path]:
+    """An isolated PATH, DadsOps venv bin/ and home: a tool without a path is only found
+    where the test puts its executable."""
+    dirs = {name: tmp_path / name for name in ("path_bin", "venv_bin", "home")}
+    for path in dirs.values():
+        path.mkdir()
+    monkeypatch.setenv("PATH", str(dirs["path_bin"]))
+    monkeypatch.setenv("HOME", str(dirs["home"]))
+    monkeypatch.setattr(registry_module, "VENV_BIN", dirs["venv_bin"])
+    return dirs
+
+
+@pytest.fixture
+def make_executable():
+    def make(directory: Path, name: str, body: str = "#!/bin/sh\nexit 0\n") -> Path:
+        path = directory / name
+        path.write_text(body)
+        path.chmod(0o755)
+        return path
+
+    return make
 
 
 @pytest.fixture

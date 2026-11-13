@@ -87,7 +87,6 @@ def client(registry, config_file, fake_runner):
 def form_body(**overrides) -> str:
     """A full settings form as the page submits it: two profiles plus the blank new row."""
     fields = {
-        "theme": "light",
         "log_dir": "/var/tmp/dadsops-logs",
         "profile_name": ["example", "example-dev", ""],
         "profile_region": ["us-east-1", "eu-west-1", ""],
@@ -173,7 +172,7 @@ def test_disabled_tool_shows_as_disabled(client, config_file):
 
 def test_open_with_a_broken_settings_file_does_not_start(client, fake_runner, config_file):
     config_file.parent.mkdir(parents=True)
-    config_file.write_text("theme: neon\n")
+    config_file.write_text("log_dir: ''\n")
 
     client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
@@ -252,7 +251,6 @@ def test_settings_page_shows_profiles_and_one_row_per_app(client, saved_settings
 def test_settings_page_saves_everything(client, config_file):
     response = post_settings(
         client,
-        theme="dark",
         default_profile="1",
         **{
             "port.tool_a": "9101",
@@ -267,7 +265,6 @@ def test_settings_page_saves_everything(client, config_file):
         profiles=(Profile("example", "us-east-1"), Profile("example-dev", "eu-west-1")),
         default_profile="example-dev",
         log_dir="/var/tmp/dadsops-logs",
-        theme="dark",
         apps={
             "tool_a": AppSettings(
                 port=9101, profile="example-dev", extra_args=("--verbose", "--name", "a b")
@@ -275,7 +272,6 @@ def test_settings_page_saves_everything(client, config_file):
             "tool_b": AppSettings(enabled=False),
         },
     )
-    assert 'class="theme-dark"' in client.get("/").text
 
 
 def test_settings_page_adds_and_removes_profiles(client, config_file, saved_settings):
@@ -309,7 +305,6 @@ def test_settings_page_adds_and_removes_profiles(client, config_file, saved_sett
         ({"default_profile": None}, "exactly one AWS profile"),
         ({"profile_region": ["us-east-1", "Mars", ""]}, "region must look like"),
         ({"log_dir": ""}, "log directory"),
-        ({"theme": "neon"}, "theme must be"),
     ],
 )
 def test_invalid_submit_shows_reason_and_keeps_the_file(
@@ -399,5 +394,163 @@ def test_settings_file_holds_no_secret_shaped_keys(client, config_file):
 
     stored = yaml.safe_load(config_file.read_text())
     flat = repr(stored).lower()
-    assert set(stored) == {"theme", "log_dir", "profiles", "apps"}
+    assert set(stored) == {"log_dir", "profiles", "apps"}
     assert not any(word in flat for word in ("secret", "token", "access_key", "password"))
+
+
+# ---------------------------------------------------------------- shared theme
+
+THEME_LINK = '<link rel="stylesheet" href="/static/theme/dadsops-theme.css">'
+
+
+@pytest.mark.parametrize("url", ["/", "/settings", "/logs", "/logs/tool_a", "/logs/tool_z"])
+def test_every_page_links_the_theme_before_app_css(client, saved_settings, url):
+    page = client.get(url)
+
+    assert THEME_LINK in page.text
+    assert page.text.index(THEME_LINK) < page.text.index('href="/static/style.css"')
+    assert "theme-light" not in page.text
+    assert "theme-dark" not in page.text
+
+
+def test_theme_file_is_served(client):
+    response = client.get("/static/theme/dadsops-theme.css")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/css")
+    first_line = response.text.splitlines()[0]
+    assert first_line == (
+        "/* DadsOps shared theme v1 — master copy, tools copy this file unchanged */"
+    )
+    assert "--bg:" in response.text
+
+
+def test_theme_file_is_self_contained(client):
+    css = client.get("/static/theme/dadsops-theme.css").text
+
+    assert "@import" not in css
+    assert "url(" not in css
+    assert "http" not in css
+
+
+@pytest.mark.parametrize(
+    ("url", "label"), [("/", "Home"), ("/settings", "Settings"), ("/logs", "Logs")]
+)
+def test_top_menu_highlights_the_current_page(client, url, label):
+    page = client.get(url).text
+
+    nav = page[page.index("<nav") : page.index("</nav>")]
+    assert re.findall(r">(Home|Settings|Logs)</a>", nav) == ["Home", "Settings", "Logs"]
+    assert re.findall(r'class="active" aria-current="page">(\w+)</a>', nav) == [label]
+
+
+def test_error_pages_use_the_theme(client):
+    page = client.get("/logs/tool_z")
+
+    assert page.status_code == 404
+    assert "unknown tool: tool_z" in page.text
+    assert THEME_LINK in page.text
+    assert 'class="active"' not in page.text
+
+
+def test_settings_page_has_no_theme_control(client):
+    page = client.get("/settings").text
+
+    assert 'name="theme"' not in page
+    assert "Theme" not in page
+
+
+def test_legacy_theme_key_in_config_still_renders(client, config_file):
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("theme: dark\n")
+
+    page = client.get("/")
+
+    assert page.status_code == 200
+    assert "Settings problem" not in page.text
+
+
+# ---------------------------------------------------------------- tools installed from PyPI
+
+
+@pytest.fixture
+def pypi_client(write_registry, config_file, fake_runner, lookup_dirs, make_executable, tool_dirs):
+    make_executable(lookup_dirs["path_bin"], "tool-a")
+    make_executable(lookup_dirs["venv_bin"], "tool-b")
+    registry = write_registry(
+        [
+            {"name": "ToolA", "start_command": "tool-a --port {port}", "port": 9001},
+            {"name": "ToolB", "start_command": "tool-b serve --port {port}", "port": 9002},
+            {"name": "ToolC", "start_command": "tool-c --port {port}", "port": 9003},
+            {
+                "name": "ToolD",
+                "path": str(tool_dirs["tool_a"]),
+                "start_command": "./run.sh",
+                "port": 9004,
+            },
+        ],
+        name="pypi_tools.yaml",
+    )
+    with TestClient(create_app(registry, config_file, runner=fake_runner)) as test_client:
+        yield test_client
+
+
+def card_html(page: str, name: str) -> str:
+    start = page.index(f'data-tool="{name}"')
+    return page[start : page.index("</article>", start)]
+
+
+def test_cards_show_where_each_tool_was_found(pypi_client, tool_dirs):
+    page = pypi_client.get("/").text
+
+    cards = re.findall(r'<article class="card status-([a-z-]+)" data-tool="(\w+)"', page)
+    assert cards == [
+        ("installed", "ToolA"),
+        ("installed", "ToolB"),
+        ("not-found", "ToolC"),
+        ("installed", "ToolD"),
+    ]
+    assert "found on PATH" in card_html(page, "ToolA")
+    assert "found in venv" in card_html(page, "ToolB")
+    assert f"found: {tool_dirs['tool_a']}" in card_html(page, "ToolD")
+
+
+def test_not_found_tool_has_no_start_button(pypi_client):
+    page = pypi_client.get("/")
+
+    assert page.status_code == 200
+    card = card_html(page.text, "ToolC")
+    assert "not found" in card
+    assert "/open/" not in card
+    assert "Start" not in card
+    assert 'action="/open/ToolA"' in page.text
+
+
+def test_settings_page_shows_location_and_resolved_command(pypi_client, lookup_dirs):
+    page = pypi_client.get("/settings").text
+    tool_a = lookup_dirs["path_bin"] / "tool-a"
+    tool_b = lookup_dirs["venv_bin"] / "tool-b"
+
+    def row(name: str) -> str:
+        start = page.index(f'<tr data-app="{name}">')
+        return page[start : page.index("</tr>", start)]
+
+    assert "found on PATH" in row("ToolA")
+    assert f"on PATH: {tool_a}" in row("ToolA")
+    assert f"<code>{tool_a} --port 9001</code>" in row("ToolA")
+    assert "found in venv" in row("ToolB")
+    assert f"in the DadsOps venv: {tool_b}" in row("ToolB")
+    assert f"<code>{tool_b} serve --port 9002</code>" in row("ToolB")
+    assert "not found" in row("ToolC")
+    assert "<code>tool-c --port 9003</code>" in row("ToolC")
+    assert "<code>./run.sh</code>" in row("ToolD")
+
+
+def test_open_a_venv_tool_starts_the_venv_executable(pypi_client, fake_runner, lookup_dirs):
+    response = pypi_client.post("/open/ToolB", headers=SAME_ORIGIN, follow_redirects=False)
+
+    assert response.headers["location"] == "http://127.0.0.1:9002/"
+    (launch,) = fake_runner.started
+    tool_b = str(lookup_dirs["venv_bin"] / "tool-b")
+    assert launch.command() == (tool_b, "serve", "--port", "9002")
+    assert launch.tool.workdir == lookup_dirs["home"]

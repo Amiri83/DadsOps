@@ -3,24 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>{% block title %}DadsOps{% endblock %} · Daddy's AWS Toolbox</title>
+  <link rel="stylesheet" href="/static/theme/dadsops-theme.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
-<body class="theme-{{ theme }}">
-  <header class="topbar">
-    <a class="brand" href="/">DadsOps <span>Daddy's AWS Toolbox</span></a>
-    <nav><a href="/">Tools</a><a href="/settings">Settings</a><a href="/logs">Logs</a></nav>
+<body>
+  <header class="shell-header">
+    <span class="brand"><a href="/">DadsOps<span class="tagline">Daddy's AWS Toolbox</span></a></span>
+    <nav aria-label="Main">
+      {% for key, href, label in [("home", "/", "Home"), ("settings", "/settings", "Settings"), ("logs", "/logs", "Logs")] %}
+      <a href="{{ href }}"{% if active == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
   </header>
-  <main>
+  <main class="page">
     {% if settings_error %}
-    <p class="banner banner-error">Settings problem: {{ settings_error }}</p>
+    <p class="flash error">Settings problem: {{ settings_error }}</p>
     {% endif %}
     {% if registry_error %}
-    <p class="banner banner-error" role="alert">Tool registry could not be loaded: {{ registry_error }}</p>
+    <p class="flash error" role="alert">Tool registry could not be loaded: {{ registry_error }}</p>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
-  <footer>Read-only toward AWS: DadsOps never calls AWS itself and stores no credentials.</footer>
+  <footer class="shell-footer">Read-only toward AWS: DadsOps never calls AWS itself and stores no credentials.</footer>
 </body>
 </html>

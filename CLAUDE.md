@@ -24,6 +24,13 @@ their own (also read-only) work.
 - Lint gate: `ruff check .` and `ruff format --check .` must pass; keep the config in
   `pyproject.toml`.
 - Update `README.md` when behaviour or the registry schema changes.
+- Registry `path` is optional: without it a tool is a console script found on PATH or in
+  the DadsOps venv `bin/` and runs in `~`. Tests isolate PATH, `registry.VENV_BIN` and
+  HOME with the `lookup_dirs` fixture; never rely on what is installed on the machine.
+- One dark theme only. `dadsops/static/theme/dadsops-theme.css` is the master copy shared
+  with the other tools: plain CSS, no CDN/imports/image URLs, first line is its version
+  comment (bump it on any change). App-specific CSS goes in `static/style.css`, linked after
+  the theme. `reference/` is gitignored stage-copy input: never edit or commit it.
 
 ## Layout
 
@@ -33,16 +40,20 @@ dadsops/
   __main__.py       # `python3 -m dadsops`
   cli.py            # `dadsops` command: bootstrap .venv, run the toolbox
   paths.py          # checkout vs installed, registry/config/log locations
-  app.py            # FastAPI app factory + routes (home, open/stop, settings, logs)
-  registry.py       # tools.yaml loading + validation + placeholders
-  config.py         # shared settings (profiles, log dir, theme, per-app) + Launch
+  app.py            # FastAPI app factory + routes (home, open/stop, settings, logs, errors)
+  registry.py       # tools.yaml loading + validation + placeholders + Location (where found)
+  config.py         # shared settings (profiles, log dir, per-app) + Launch
   forms.py          # settings page form <-> Settings
   logs.py           # safe per-tool log path + tail
   runner.py         # start/stop/status of a tool process (port + PID)
-  default_tools.yaml  # packaged registry, copied to ~/.config/dadsops/ when installed
-  templates/        # home, settings, logs pages + card fragment
-  static/           # css/js, no CDN
-tools.yaml          # tool registry for a checkout (name, path, start command, port)
+  default_tools.yaml  # packaged registry (console scripts, no paths), copied to ~/.config/dadsops/
+  templates/        # base (top menu), home, settings, logs, error pages + card fragment
+  static/
+    theme/dadsops-theme.css  # shared theme, master copy (tools copy it unchanged)
+    style.css       # DadsOps-only layout, after the theme
+    app.js          # "Starting…" feedback; no CDN
+tools.yaml          # tool registry for a checkout (name, ../ paths, start command, port)
+reference/          # gitignored TFLens CSS copies, read-only input
 .github/workflows/  # tests.yml (CI), publish.yml (PyPI trusted publishing on v* tags)
 tests/
   fixtures/         # small yaml/json fixtures
