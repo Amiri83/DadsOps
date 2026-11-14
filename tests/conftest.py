@@ -1,5 +1,7 @@
 import sys
 import textwrap
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,40 @@ def lookup_dirs(tmp_path: Path, monkeypatch) -> dict[str, Path]:
     monkeypatch.setenv("HOME", str(dirs["home"]))
     monkeypatch.setattr(registry_module, "VENV_BIN", dirs["venv_bin"])
     return dirs
+
+
+@pytest.fixture
+def fake_tool_server():
+    """Start a tiny HTTP server on 127.0.0.1, port 0 (the OS picks a free one) that answers
+    every GET with the given headers; returns its port. Stopped after the test."""
+    servers: list[ThreadingHTTPServer] = []
+
+    def start(headers: list[tuple[str, str]] | None = None, redirect_to: str | None = None):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if redirect_to and self.path == "/":
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to)
+                else:
+                    self.send_response(200)
+                    for name, value in headers or []:
+                        self.send_header(name, value)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return server.server_address[1]
+
+    yield start
+    for server in servers:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.fixture

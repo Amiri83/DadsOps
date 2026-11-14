@@ -15,12 +15,15 @@ from typing import Any
 import yaml
 
 REQUIRED_KEYS = ("name", "start_command", "port")
-OPTIONAL_KEYS = ("path", "description", "health_path", "coming_soon")
+OPTIONAL_KEYS = ("path", "package", "description", "health_path", "coming_soon")
 PLACEHOLDERS = ("port", "profile", "region", "log_dir")
 PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-# A tool without a path is a console script: looked up on PATH, then next to DadsOps's
-# own interpreter (the venv it runs from). Read at call time so tests can point it away.
+# A PyPI distribution name (PEP 508), used for the `pip install <package>` hint.
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
+# A tool without a path is a console script: looked up next to DadsOps's own interpreter
+# (the venv it runs from, where `pip install dadsops` put the bundled tools) first, then on
+# PATH. Read at call time so tests can point it away.
 VENV_BIN = Path(sys.executable).parent
 
 
@@ -74,6 +77,7 @@ class Tool:
     description: str = ""
     health_path: str | None = None
     coming_soon: bool = False
+    package: str | None = None
 
     def placeholders(self) -> set[str]:
         return placeholders_in(self.start_command)
@@ -90,17 +94,18 @@ class Tool:
         return self.start_command[0]
 
     def locate(self) -> Location:
-        """A checkout path must exist; with no path, the command must be on PATH or in the venv."""
+        """A checkout path must exist; with no path, the command must be in the DadsOps venv
+        (checked first, that is where the bundled tools are installed) or on PATH."""
         if self.path is not None:
             return Location("checkout", self.path) if self.path.is_dir() else Location("missing")
         venv_bin = Path(VENV_BIN)
+        found = shutil.which(self.program, path=str(venv_bin))
+        if found is not None:
+            return Location("venv", Path(found))
         found = shutil.which(self.program)
         if found is not None:
             found_path = Path(found)
             return Location("venv" if found_path.parent == venv_bin else "path", found_path)
-        found = shutil.which(self.program, path=str(venv_bin))
-        if found is not None:
-            return Location("venv", Path(found))
         return Location("missing")
 
     @property
@@ -112,10 +117,20 @@ class Tool:
         """The checkout when there is one, else the user's home directory."""
         return self.path if self.path is not None else Path(os.path.expanduser("~"))
 
+    @property
+    def install_command(self) -> str | None:
+        """How to fix a missing console script: pip install of its PyPI distribution."""
+        if self.path is not None or self.package is None:
+            return None
+        return f"pip install {self.package}"
+
     def missing_reason(self) -> str:
         if self.path is not None:
             return f"not found at {self.path}"
-        return f"{self.program!r} not found on PATH or in the DadsOps venv"
+        reason = f"{self.program!r} not found in the DadsOps venv or on PATH"
+        if self.install_command:
+            reason += f"; install it with: {self.install_command}"
+        return reason
 
     @property
     def status(self) -> str:
@@ -189,6 +204,10 @@ def _parse_entry(entry: Any, index: int, base: Path) -> Tool:
     if not isinstance(coming_soon, bool):
         raise RegistryError(f"{where}: coming_soon must be true or false")
 
+    package = entry.get("package")
+    if package is not None and (not isinstance(package, str) or not PACKAGE_RE.match(package)):
+        raise RegistryError(f"{where}: package must be a PyPI distribution name, got {package!r}")
+
     description = entry.get("description", "")
     if not isinstance(description, str):
         raise RegistryError(f"{where}: description must be a string")
@@ -201,6 +220,7 @@ def _parse_entry(entry: Any, index: int, base: Path) -> Tool:
         description=description.strip(),
         health_path=health_path,
         coming_soon=coming_soon,
+        package=package,
     )
 
 

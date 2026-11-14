@@ -3,44 +3,70 @@
 A small local web launcher for the sibling AWS portfolio tools (EC2Patcher,
 IPLens, TFLens, RoleLens). It shows one card per tool with a live status badge.
 Click a card (a plain form POST, no JavaScript needed) and DadsOps starts that
-tool if it is not running yet, waits for its port to answer, then opens it in
-the same browser tab.
+tool if it is not running yet, waits for its port to answer, then shows it
+inside DadsOps: the DadsOps top bar stays on top and the tool fills the rest of
+the window.
 
 DadsOps is **read-only toward AWS**. It never calls an AWS API and never stores
 credentials. It only passes profile and region *names* to the tools it starts,
 and those tools do their own (also read-only) work.
 
-## Quick start (from a checkout)
+## Quick start
+
+```bash
+pip install dadsops
+dadsops                        # serve on http://127.0.0.1:8080/ (same as `dadsops run`)
+```
+
+That is all: the tools are bundled. `pip install dadsops` also installs the
+tools' own PyPI distributions, so their console scripts land next to DadsOps
+and every card shows **installed**. There are no separate tool installs, no
+paths to configure and no commands to type.
+
+| Tool       | PyPI distribution | Console script | Default port |
+|------------|-------------------|----------------|--------------|
+| EC2Patcher | `ec2patcher`      | `ec2patcher`   | 8081         |
+| IPLens     | `aws-iplens`      | `iplens`       | 8082         |
+| TFLens     | `aws-tflens` (*)  | `tflens`       | 8083         |
+| RoleLens   | (coming soon)     | `rolelens`     | 8084         |
+
+(*) `aws-tflens` is **not on PyPI yet**, so it is held in an optional extra
+(`pip install "dadsops[tools]"`, which only works once it is published) instead
+of the required dependencies; it moves into them once the distribution is
+published. Until then the TFLens card shows **not found** with the
+`pip install aws-tflens` hint, and in development TFLens comes from an editable
+install (see [Development](#development)). Not to be confused with the
+unrelated PyPI project called `tflens`.
+
+On first run the packaged default registry is copied to
+`~/.config/dadsops/tools.yaml`. It has no paths: each tool is a console script,
+looked up in the venv DadsOps runs from first (the directory of its Python,
+`bin/` or `Scripts/`), then on `PATH`. A tool that is genuinely missing shows
+**not found** with the exact fix, e.g. `pip install aws-iplens`. Edit the copy
+to change ports or to point a tool at a checkout (add `path:`). It is never
+overwritten, not even by an upgrade.
+
+## From a checkout
 
 ```bash
 git clone <this repo> DadsOps && cd DadsOps
 python3 -m dadsops            # serve on http://127.0.0.1:8080/
 ```
 
-No `PYTHONPATH` and no activated venv needed. The current interpreter only runs
-the bootstrap: it creates `.venv` if it is missing, installs the project into it
-(`pip install -e .`) if anything is missing, then re-executes itself inside
-`.venv` and serves. Later runs reuse the venv and start straight away.
+Cloning just this repo is enough. No `PYTHONPATH` and no activated venv needed:
+the current interpreter only runs the bootstrap. It creates `.venv` if it is
+missing and, if anything is missing from it (DadsOps itself or any dependency
+in `pyproject.toml`, the bundled tools included), runs `pip install -e .` into
+it, which installs the same set as `pip install dadsops` (minus the held
+`aws-tflens`). Then it re-executes itself inside `.venv` and serves. Later runs
+reuse the venv and start straight away. The checkout's `tools.yaml` lists the
+same console scripts as the packaged default, without paths.
 
 - `python3 -m dadsops` with no arguments is the same as `python3 -m dadsops run`;
   `python3 -m dadsops install` only does the venv part.
 - `--port` or `DADSOPS_PORT` sets the port (default `8080`). `--host` sets the
   bind address (default `127.0.0.1`; anything else prints a warning).
 - `--registry` or `DADSOPS_REGISTRY` points to another registry file.
-
-## Install with pip
-
-```bash
-pip install dadsops
-dadsops                        # same as `dadsops run`
-```
-
-On first run the packaged default registry is copied to
-`~/.config/dadsops/tools.yaml`. It has no paths: each tool is the console
-script its own PyPI package installs (`ec2patcher`, `iplens`, `tflens serve`),
-so `pip install ec2patcher iplens tflens` next to DadsOps is all it takes. Edit
-the copy to change ports or to point a tool at a checkout (add `path:`). It is
-never overwritten, not even by an upgrade.
 
 Which registry is used, first match wins:
 
@@ -62,6 +88,7 @@ tools:
     coming_soon: false            # optional; shows the "coming soon" badge, never started
 
   - name: IPLens                  # no path: a console script installed from PyPI
+    package: aws-iplens           # optional; its PyPI distribution, for the "pip install" hint
     start_command: iplens --port {port}
     port: 8082
 ```
@@ -74,13 +101,15 @@ split like a shell would (`shlex.split`); a list is used as is.
 | Registry entry | Installed when                                              | Runs in        | Card shows           |
 |----------------|-------------------------------------------------------------|----------------|----------------------|
 | `path:` given  | the directory exists                                        | that directory | `found: ~/EC2Patcher` |
-| no `path:`     | the first word of `start_command` is on `PATH`              | your home dir  | `found on PATH`      |
-| no `path:`     | ...or is in the DadsOps venv's `bin/` (next to its Python)  | your home dir  | `found in venv`      |
+| no `path:`     | the first word of `start_command` is in the DadsOps venv's `bin/` (next to its Python), checked first | your home dir | `found in venv` |
+| no `path:`     | ...or is on `PATH`                                          | your home dir  | `found on PATH`      |
 | either         | none of the above                                           | -              | `not found`          |
 
 A tool without a path is started with the full path of the executable it was
 found as, so a tool installed only in the DadsOps venv starts even when that
-venv is not on `PATH`. A tool that is not found shows **not found** and has no
+venv is not on `PATH`; the venv copy wins over another one on `PATH`. A tool
+that is not found shows **not found**, says what is missing and, when the entry
+has a `package`, the `pip install <package>` command that fixes it; it has no
 start button. The Settings page shows, per app, exactly where it was found and
 the resolved command it would run.
 
@@ -102,7 +131,8 @@ single word (`{}`, `{"a": 1}`) are left alone. A command that uses `{profile}`
 or `{region}` while no AWS profile is configured is refused with that reason.
 
 Validation also rejects duplicate names or ports, missing required keys,
-unknown keys, a bad port, an empty `path` and an empty command. If a tool's
+unknown keys, a bad port, an empty `path`, a `package` that is not a valid
+distribution name and an empty command. If a tool's
 `path` does not exist or its command is not installed, that is not an error:
 the tool just shows **not found**. If the registry
 can't be read or is invalid, every page shows the error instead of crashing.
@@ -166,8 +196,9 @@ Environment variables, on top of DadsOps' own environment:
 
 ## Shared theme
 
-Every page (Home, Settings, Logs, error pages) uses one dark theme with one top
-menu (Home, Settings, Logs; the current page is highlighted). It lives in
+Every page (Home, tool pages, Settings, Logs, error pages) uses one dark theme
+with one top menu (Home, the tool switcher, Settings, Logs; the current page is
+highlighted). It lives in
 `dadsops/static/theme/dadsops-theme.css`, served at
 `/static/theme/dadsops-theme.css` and linked first on every page; DadsOps' own
 `static/style.css` comes after it and only adds layout, never colours or fonts.
@@ -199,10 +230,33 @@ one tool. A name that is not a plain registry name (anything with `.`, `/`,
 `\` and so on) is refused with `400`, so a request can never read a file
 outside the log directory.
 
+## Opening a tool inside DadsOps
+
+`/tool/<tool>` shows the normal DadsOps top bar with the tool below it in an
+iframe that takes the rest of the window: the page itself does not scroll, the
+tool has its own scrollbar. The iframe loads the tool's own address,
+`http://127.0.0.1:<port>/`, with the port from Settings if one is set there,
+else from the registry. The card's Open action lands here, and so does the tool
+switcher in the top bar, which links every tool that is installed and enabled.
+
+- If the tool is not running, the page starts it first, through the same start
+  flow and log file as the card (see below). If it cannot be started or does not
+  answer, the page shows that error (and a link to its log), never a blank frame.
+  When the request came from another site (`Sec-Fetch-Site: cross-site` or
+  `same-site`), it asks with a Start button instead of starting on a plain link.
+- Before showing the frame, DadsOps fetches the tool's `/` (following redirects
+  on the tool's own address) and checks its response headers. A browser will not
+  frame a page that sends `X-Frame-Options: DENY` or `SAMEORIGIN` (DadsOps and
+  the tool are on different ports, so different origins) or a
+  `Content-Security-Policy` whose `frame-ancestors` does not list the DadsOps
+  address (`frame-ancestors` wins over `X-Frame-Options`, as in browsers). Then
+  the page says which tool and which header blocks it, and offers **Open
+  &lt;tool&gt; in this tab**: a plain link to the tool, no iframe.
+
 ## Starting and stopping
 
 - `POST /open/<tool>` (the card's form) starts the tool if needed and redirects to
-  `http://127.0.0.1:<port>/`. If the port already answers, or DadsOps already
+  its page, `/tool/<tool>`. If the port already answers, or DadsOps already
   holds a live process for the tool, it only redirects. A start waits up to 30s
   for the port. If it times out, the process is stopped and the card shows why.
   Exit codes and the last output line of a failed command show on the card too.
@@ -227,7 +281,23 @@ python3 -m dadsops install            # create .venv and install the project
 
 Tests make no network calls and start no real tools. Process tests use a stub
 script in `tmp_path`, and readiness is checked through a marker file instead of
-a socket.
+a socket. The framing checks run against tiny fake tool servers bound to
+`127.0.0.1` on port 0.
+
+### Testing an unreleased tool
+
+Install the tool's checkout into the DadsOps venv as an editable install:
+
+```bash
+/data/projects/DadsOps/.venv/bin/python -m pip install -e ../TFLens
+```
+
+(or `.venv/bin/python -m pip install -e ../<tool>` from the repo root). A local
+editable install wins over the PyPI copy: it replaces that distribution in the
+venv, so its console script is the one DadsOps finds and starts. Re-running
+`python3 -m dadsops` keeps it, because the bootstrap only reinstalls when
+something is missing. `aws-tflens` is not on PyPI yet, so until it is published
+TFLens comes from this editable install.
 
 ## Releasing
 

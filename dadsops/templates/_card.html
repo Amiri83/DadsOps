@@ -23,6 +23,10 @@
   {% if not tool.coming_soon %}
   <p class="found small muted" title="{{ card.location.detail }}">{{ card.location.label }}</p>
   {% endif %}
+  {% if status == "not found" %}
+  <p class="missing small">{% if tool.path %}{{ tool.name }} is not installed: no checkout at {{ tool.path }}.{% else %}{{ tool.name }} is not installed: <code>{{ tool.program }}</code> is not in the DadsOps venv or on PATH.{% endif %}
+    {% if tool.install_command %}Install it with <code class="install">{{ tool.install_command }}</code> in the environment DadsOps runs from.{% endif %}</p>
+  {% endif %}
   {% if card.error %}<p class="failure" role="alert">{{ card.error }}</p>{% endif %}
   {% if status == "installed" or card.owned %}
   <div class="actions">

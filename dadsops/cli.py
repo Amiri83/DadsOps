@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
+import tomllib
 import venv
 from pathlib import Path
 
@@ -17,6 +19,8 @@ from dadsops.paths import checkout_root, config_path, registry_path
 
 REQUIRED_MODULES = ("dadsops", "fastapi", "uvicorn", "yaml", "jinja2")
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+REQUIREMENT_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+DIST_PROBE = "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"
 
 
 def port_number(value: str) -> int:
@@ -57,15 +61,43 @@ def can_import(python: Path, venv_dir: Path, *modules: str) -> bool:
     return subprocess.run(probe, cwd=venv_dir, env=env, capture_output=True).returncode == 0
 
 
+def required_distributions(root: Path) -> list[str]:
+    """The distribution names in pyproject.toml's [project].dependencies (the bundled tools
+    included), so the checkout venv gets exactly what `pip install dadsops` gets."""
+    try:
+        project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    names = []
+    for requirement in project.get("project", {}).get("dependencies", []):
+        match = REQUIREMENT_NAME_RE.match(requirement)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def has_distributions(python: Path, venv_dir: Path, names: list[str]) -> bool:
+    """Whether every named distribution is installed in the venv."""
+    if not names:
+        return True
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    probe = [str(python), "-c", DIST_PROBE, *names]
+    return subprocess.run(probe, cwd=venv_dir, env=env, capture_output=True).returncode == 0
+
+
 def install(root: Path) -> Path:
-    """Create <root>/.venv if missing and install the project into it if any import fails."""
+    """Create <root>/.venv if missing and install the project into it if any import fails
+    or any dependency (a bundled tool, say) is missing."""
     venv_dir = root / ".venv"
     python = venv_dir / "bin" / "python"
     if not python.exists():
         print(f"dadsops: creating venv in {venv_dir}")
         venv.create(venv_dir, with_pip=True)
-    if not can_import(python, venv_dir, *REQUIRED_MODULES):
-        print("dadsops: installing dadsops and its dependencies into the venv")
+    complete = can_import(python, venv_dir, *REQUIRED_MODULES) and has_distributions(
+        python, venv_dir, required_distributions(root)
+    )
+    if not complete:
+        print("dadsops: installing dadsops, its dependencies and the bundled tools into the venv")
         command = [str(python), "-m", "pip", "install", "-e", str(root)]
         if can_import(python, venv_dir, "setuptools"):
             command.append("--no-build-isolation")  # reuse it, so this also works offline
