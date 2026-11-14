@@ -6,6 +6,8 @@ import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
 
+import yaml
+
 from dadsops import app as app_module
 from dadsops import paths
 
@@ -63,6 +65,51 @@ def test_bootstrap_modules_import_only_the_standard_library():
                 assert module in allowed or module.split(".")[0] in sys.stdlib_module_names, (
                     f"{name} imports {module} at module level"
                 )
+
+
+def requirements(group: list[str]) -> dict[str, str]:
+    """{distribution: version specifier} for a list of PEP 508 requirement strings."""
+    parsed = {}
+    for requirement in group:
+        name, _, spec = requirement.partition(">=")
+        parsed[name.strip()] = f">={spec.strip()}" if spec else ""
+    return parsed
+
+
+def test_bundled_tools_are_required_dependencies_with_lower_bounds_only():
+    required = requirements(PYPROJECT["project"]["dependencies"])
+
+    assert required["ec2patcher"] == ">=1.2"
+    assert required["aws-iplens"] == ">=1.6"
+    for requirement in PYPROJECT["project"]["dependencies"]:
+        assert "<" not in requirement and "==" not in requirement and "~=" not in requirement
+
+
+def test_unpublished_tflens_is_held_in_the_tools_extra():
+    extras = PYPROJECT["project"]["optional-dependencies"]
+    required = requirements(PYPROJECT["project"]["dependencies"])
+
+    assert extras["tools"] == ["aws-tflens>=0.1"]
+    assert "aws-tflens" not in required, "not on PyPI yet: would break pip install dadsops"
+    every = [r for group in [PYPROJECT["project"]["dependencies"], *extras.values()] for r in group]
+    assert "tflens" not in requirements(every), "the unrelated PyPI project of that name"
+    assert {"pytest", "httpx", "ruff"} <= set(requirements(extras["dev"]))
+
+
+def test_registry_packages_match_the_declared_distributions():
+    """Every package a registry names is a dependency (or the held extra) of DadsOps."""
+    declared = set(requirements(PYPROJECT["project"]["dependencies"]))
+    declared |= set(requirements(PYPROJECT["project"]["optional-dependencies"]["tools"]))
+    for registry in (paths.DEFAULT_REGISTRY, REPO_ROOT / "tools.yaml"):
+        entries = yaml.safe_load(registry.read_text())["tools"]
+        packages = {e["name"]: e.get("package") for e in entries}
+        assert packages == {
+            "EC2Patcher": "ec2patcher",
+            "IPLens": "aws-iplens",
+            "TFLens": "aws-tflens",
+            "RoleLens": None,
+        }
+        assert {p for p in packages.values() if p} <= declared
 
 
 def test_version_comes_from_the_package():

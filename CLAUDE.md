@@ -24,8 +24,9 @@ their own (also read-only) work.
 - Lint gate: `ruff check .` and `ruff format --check .` must pass; keep the config in
   `pyproject.toml`.
 - Update `README.md` when behaviour or the registry schema changes.
-- Registry `path` is optional: without it a tool is a console script found on PATH or in
-  the DadsOps venv `bin/` and runs in `~`. Tests isolate PATH, `registry.VENV_BIN` and
+- Registry `path` is optional: without it a tool is a console script found in the DadsOps
+  venv `bin/` (first) or on PATH and runs in `~`. The bundled tools are `pyproject.toml`
+  dependencies; `package:` names the distribution for the `pip install` hint. Tests isolate PATH, `registry.VENV_BIN` and
   HOME with the `lookup_dirs` fixture; never rely on what is installed on the machine.
 - One dark theme only. `dadsops/static/theme/dadsops-theme.css` is the master copy shared
   with the other tools: plain CSS, no CDN/imports/image URLs, first line is its version
@@ -46,13 +47,14 @@ dadsops/
   forms.py          # settings page form <-> Settings
   logs.py           # safe per-tool log path + tail
   runner.py         # start/stop/status of a tool process (port + PID)
+  framing.py        # probe a tool's X-Frame-Options / CSP frame-ancestors for the tool page
   default_tools.yaml  # packaged registry (console scripts, no paths), copied to ~/.config/dadsops/
-  templates/        # base (top menu), home, settings, logs, error pages + card fragment
+  templates/        # base (top menu + tool switcher), home, tool (iframe), settings, logs, error + card
   static/
     theme/dadsops-theme.css  # shared theme, master copy (tools copy it unchanged)
     style.css       # DadsOps-only layout, after the theme
     app.js          # "Starting…" feedback; no CDN
-tools.yaml          # tool registry for a checkout (name, ../ paths, start command, port)
+tools.yaml          # tool registry for a checkout (same console scripts as the default, no paths)
 reference/          # gitignored TFLens CSS copies, read-only input
 .github/workflows/  # tests.yml (CI), publish.yml (PyPI trusted publishing on v* tags)
 tests/

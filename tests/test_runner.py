@@ -318,7 +318,7 @@ def test_tool_without_path_and_missing_command_is_not_started(
     result = make_runner(probe=lambda _tool: False).start(load_launch(entry))
 
     assert not result.ok
-    assert result.message == "'tool-a' not found on PATH or in the DadsOps venv"
+    assert result.message == "'tool-a' not found in the DadsOps venv or on PATH"
 
 
 def test_stop_kills_the_process_dadsops_started(make_runner, load_launch):
