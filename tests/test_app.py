@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from dadsops.app import create_app
 from dadsops.config import AppSettings, Profile, Settings, load_settings, save_settings
+from dadsops.paths import DEFAULT_REGISTRY
 from dadsops.runner import Runner, StartResult
 
 SAME_ORIGIN = {"origin": "http://testserver"}
@@ -141,11 +142,13 @@ def test_invalid_registry_shows_message_instead_of_crashing(config_file, fake_ru
     assert "No tools in the registry" in logs.text
 
 
-def test_open_starts_tool_with_settings_and_redirects_to_it(client, fake_runner, saved_settings):
+def test_open_starts_tool_with_settings_and_redirects_to_its_page(
+    client, fake_runner, saved_settings
+):
     response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://127.0.0.1:9001/"
+    assert response.headers["location"] == "/tool/tool_a"
     (launch,) = fake_runner.started
     assert launch.tool.name == "tool_a"
     assert launch.profile == Profile("example", "us-east-1")
@@ -157,7 +160,8 @@ def test_open_uses_the_per_app_port_over_the_registry(client, fake_runner, confi
 
     response = client.post("/open/tool_a", headers=SAME_ORIGIN, follow_redirects=False)
 
-    assert response.headers["location"] == "http://127.0.0.1:9101/"
+    assert response.headers["location"] == "/tool/tool_a"
+    assert fake_runner.started[0].tool.port == 9101
     assert fake_runner.started[0].command() == ("./run.sh", "--port", "9101")
 
 
@@ -546,10 +550,62 @@ def test_settings_page_shows_location_and_resolved_command(pypi_client, lookup_d
     assert "<code>./run.sh</code>" in row("ToolD")
 
 
+@pytest.fixture
+def default_client(tmp_path, config_file, fake_runner, lookup_dirs):
+    """The packaged registry, nothing configured: what a fresh `pip install dadsops` sees."""
+    registry = tmp_path / "default_tools.yaml"
+    registry.write_bytes(DEFAULT_REGISTRY.read_bytes())
+    with TestClient(create_app(registry, config_file, runner=fake_runner)) as test_client:
+        yield test_client
+
+
+def card_statuses(page: str) -> dict[str, str]:
+    cards = re.findall(r'<article class="card status-([a-z-]+)" data-tool="(\w+)"', page)
+    return {name: status for status, name in cards}
+
+
+def test_bundled_tools_in_the_venv_bin_are_installed_out_of_the_box(
+    default_client, lookup_dirs, make_executable
+):
+    for program in ("ec2patcher", "iplens", "tflens"):
+        make_executable(lookup_dirs["venv_bin"], program)
+
+    page = default_client.get("/").text
+
+    assert card_statuses(page) == {
+        "EC2Patcher": "installed",
+        "IPLens": "installed",
+        "TFLens": "installed",
+        "RoleLens": "coming-soon",
+    }
+    assert "found in venv" in card_html(page, "TFLens")
+    assert "pip install" not in page
+
+
+def test_bundled_tool_only_on_path_is_installed(default_client, lookup_dirs, make_executable):
+    make_executable(lookup_dirs["path_bin"], "iplens")
+
+    page = default_client.get("/").text
+
+    assert card_statuses(page)["IPLens"] == "installed"
+    assert "found on PATH" in card_html(page, "IPLens")
+
+
+def test_missing_bundled_tool_names_the_pip_distribution(default_client):
+    page = default_client.get("/").text
+
+    assert card_statuses(page)["IPLens"] == "not-found"
+    card = card_html(page, "IPLens")
+    assert "<code>iplens</code> is not in the DadsOps venv or on PATH" in card
+    assert '<code class="install">pip install aws-iplens</code>' in card
+    assert '<code class="install">pip install aws-tflens</code>' in card_html(page, "TFLens")
+    assert "pip install" not in card_html(page, "RoleLens")
+
+
 def test_open_a_venv_tool_starts_the_venv_executable(pypi_client, fake_runner, lookup_dirs):
     response = pypi_client.post("/open/ToolB", headers=SAME_ORIGIN, follow_redirects=False)
 
-    assert response.headers["location"] == "http://127.0.0.1:9002/"
+    assert response.headers["location"] == "/tool/ToolB"
     (launch,) = fake_runner.started
     tool_b = str(lookup_dirs["venv_bin"] / "tool-b")
     assert launch.command() == (tool_b, "serve", "--port", "9002")

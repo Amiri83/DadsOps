@@ -25,9 +25,17 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pyyaml>=6.0",
     "jinja2>=3.1",
+    # The bundled tools: `pip install dadsops` installs their console scripts next to it.
+    "ec2patcher>=1.2",
+    "aws-iplens>=1.6",
 ]
 
 [project.optional-dependencies]
+# aws-tflens moves into the required dependencies above once the TFLens distribution is
+# published on PyPI (not the unrelated `tflens` project). Until then: pip install -e ../TFLens
+tools = [
+    "aws-tflens>=0.1",
+]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",

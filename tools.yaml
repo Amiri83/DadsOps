@@ -1,30 +1,32 @@
-# DadsOps tool registry for a source checkout. Paths are relative to this file.
+# DadsOps tool registry for a source checkout.
+# Same tools as the packaged default: console scripts that `python3 -m dadsops` installs into
+# this repo's .venv from PyPI, so cloning just this repo is enough. To run an unreleased
+# tool, `pip install -e ../<tool>` into .venv (an editable install wins over the PyPI copy),
+# or add `path: ../<tool>` to its entry (relative to this file) to run inside a checkout.
 # Placeholders in start_command: {port} {profile} {region} {log_dir}.
 # Each tool gets PORT, AWS_PROFILE, AWS_REGION and DADSOPS_LOG_DIR in its env.
-# Leave out `path` to use a console script from PATH or the DadsOps venv instead.
 # Per-app port, profile, enabled and extra args are set on the Settings page and win over this file.
 tools:
   - name: EC2Patcher
     description: Patch EC2 servers from CVE lists
-    path: ../EC2Patcher
-    start_command: .venv/bin/python -m ec2patcher --port {port}
+    package: ec2patcher
+    start_command: ec2patcher --port {port}
     port: 8081
 
   - name: IPLens
     description: Private IP usage per subnet/ENI
-    path: ../IPLens
-    start_command: .venv/bin/python -m iplens --port {port}
+    package: aws-iplens
+    start_command: iplens --port {port}
     port: 8082
 
   - name: TFLens
     description: "Explain Terraform repos: resources, access, code refs"
-    path: ../tflens
-    start_command: .venv/bin/python -m tflens serve --port {port}
+    package: aws-tflens
+    start_command: tflens serve --port {port}
     port: 8083
 
   - name: RoleLens
     description: Visualize and edit IAM roles, export JSON/HCL
-    path: ../RoleLens
-    start_command: .venv/bin/python -m rolelens --port {port}
+    start_command: rolelens --port {port}
     port: 8084
     coming_soon: true

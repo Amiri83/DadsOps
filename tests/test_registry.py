@@ -87,7 +87,7 @@ def test_repo_registry_loads(tmp_path: Path):
         "TFLens": 8083,
         "RoleLens": 8084,
     }
-    assert tools["TFLens"].path == (tmp_path.parent / "tflens").resolve()
+    assert all(tool.path is None for tool in tools.values()), "a clone alone must work"
     assert tools["TFLens"].description == "Explain Terraform repos: resources, access, code refs"
     for tool in tools.values():
         assert tool.command({"port": str(tool.port)})[-2:] == ("--port", str(tool.port))
@@ -95,10 +95,12 @@ def test_repo_registry_loads(tmp_path: Path):
 
 def test_packaged_default_lists_the_same_tools_as_the_checkout_registry():
     def summary(path: Path) -> list[tuple]:
-        return [(t.name, t.port, t.description, t.coming_soon) for t in load_registry(path)]
+        return [
+            (t.name, t.port, t.description, t.coming_soon, t.start_command, t.package)
+            for t in load_registry(path)
+        ]
 
     assert summary(DEFAULT_REGISTRY) == summary(REPO_REGISTRY)
-    assert all(tool.path is not None for tool in load_registry(REPO_REGISTRY))
 
 
 def test_packaged_default_uses_console_scripts_and_no_paths():
@@ -273,7 +275,34 @@ def test_no_path_and_command_missing_is_not_found(write_registry, lookup_dirs, m
     assert tool.status == "not found"
     assert not tool.installed
     assert tool.locate().label == "not found"
-    assert tool.missing_reason() == "'tool-a' not found on PATH or in the DadsOps venv"
+    assert tool.missing_reason() == "'tool-a' not found in the DadsOps venv or on PATH"
+    assert tool.install_command is None
+
+
+def test_missing_console_script_names_its_pip_distribution(write_registry, lookup_dirs):
+    entry = base_entry(path=None, start_command="tool-a", package="example-tool-a")
+    (tool,) = load_registry(write_registry([entry]))
+
+    assert tool.install_command == "pip install example-tool-a"
+    assert tool.missing_reason() == (
+        "'tool-a' not found in the DadsOps venv or on PATH; "
+        "install it with: pip install example-tool-a"
+    )
+
+
+@pytest.mark.parametrize("package", ["", "-bad", "two words", "../tool_a", 7])
+def test_invalid_package_is_rejected(write_registry, package):
+    with pytest.raises(RegistryError, match="package must be a PyPI distribution name"):
+        load_registry(write_registry([base_entry(package=package)]))
+
+
+def test_venv_bin_is_searched_before_path(write_registry, lookup_dirs, make_executable):
+    """The bundled copy next to DadsOps wins over another install of the same command."""
+    make_executable(lookup_dirs["path_bin"], "tool-a")
+    venv_exe = make_executable(lookup_dirs["venv_bin"], "tool-a")
+    (tool,) = load_registry(write_registry([base_entry(path=None, start_command="tool-a")]))
+
+    assert (tool.locate().kind, tool.locate().where) == ("venv", venv_exe)
 
 
 def test_non_executable_file_on_path_is_not_found(write_registry, lookup_dirs):

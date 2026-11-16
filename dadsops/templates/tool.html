@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ tool.name }}{% endblock %}
+{% block body_class %}{% if framed %}tool-view{% endif %}{% endblock %}
+{% block content %}
+{% if framed %}
+<iframe class="tool-frame" src="{{ url }}" title="{{ tool.name }}" data-tool="{{ tool.name }}"></iframe>
+{% else %}
+<h1>{{ tool.name }}</h1>
+<div class="card tool-status" data-tool="{{ tool.name }}">
+  {% if error %}
+  <p class="flash error" role="alert">{{ tool.name }} could not be opened: {{ error }}</p>
+  <p class="actions">
+    <a class="btn secondary" href="/logs/{{ tool.name }}">{{ tool.name }} log</a>
+    <a class="btn secondary" href="/">Back to Home</a>
+  </p>
+  {% elif blocked_by %}
+  <p class="flash warn" role="alert">{{ tool.name }} cannot be shown inside DadsOps: it sends
+    <code class="blocked-by">{{ blocked_by }}</code>, so the browser refuses to display it in a frame.</p>
+  <p class="actions">
+    <a class="btn same-tab" href="{{ url }}" target="_self">Open {{ tool.name }} in this tab</a>
+    <a class="btn secondary" href="/">Back to Home</a>
+  </p>
+  <p class="hint small">{{ tool.name }} runs at <code>{{ url }}</code>; use the browser's Back button to return to DadsOps.</p>
+  {% elif needs_start %}
+  <p>{{ tool.name }} is not running. This link came from another site, so DadsOps asks first.</p>
+  <form method="post" action="/open/{{ tool.name }}">
+    <p class="actions"><button type="submit">Start {{ tool.name }}</button></p>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block footer %}{% if not framed %}{{ super() }}{% endif %}{% endblock %}

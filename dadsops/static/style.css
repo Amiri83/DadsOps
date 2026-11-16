@@ -50,3 +50,29 @@
 }
 .log h2 { margin-top: 0; font-size: var(--fs-md); display: flex; gap: var(--sp-2); align-items: center; }
 .log pre { max-height: 24rem; background: var(--bg); font-size: 12.5px; }
+
+/* ---------------------------------------------------------------- top bar tool switcher */
+.shell-header .switcher {
+  display: flex; align-self: stretch; margin: 0 .4rem; padding: 0 .4rem;
+  border-left: 1px solid var(--header-border); border-right: 1px solid var(--header-border);
+}
+.shell-header nav .tool-link.is-starting::after {
+  content: " starting…"; color: var(--header-muted); font-weight: 400;
+}
+
+/* ---------------------------------------------------------------- missing tool hint (home) */
+.card .missing { margin: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- tool page */
+/* The tool fills the viewport under the top bar; the page itself never scrolls, the tool
+   inside the iframe has its own scrollbar. */
+body.tool-view { height: 100vh; overflow: hidden; }
+body.tool-view main.page {
+  display: flex; flex-direction: column; min-height: 0; max-width: none; padding: 0;
+}
+body.tool-view main.page > .flash { margin: var(--sp-2) 1.25rem; }
+.tool-frame {
+  display: block; flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--bg);
+}
+.tool-status { max-width: 48rem; }
+.tool-status .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

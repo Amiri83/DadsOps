@@ -9,13 +9,20 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="shell-header">
     <span class="brand"><a href="/">DadsOps<span class="tagline">Daddy's AWS Toolbox</span></a></span>
     <nav aria-label="Main">
-      {% for key, href, label in [("home", "/", "Home"), ("settings", "/settings", "Settings"), ("logs", "/logs", "Logs")] %}
-      <a href="{{ href }}"{% if active == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
-      {% endfor %}
+      <a href="/"{% if active == "home" %} class="active" aria-current="page"{% endif %}>Home</a>
+      {% if switcher %}
+      <span class="switcher" role="group" aria-label="Tools">
+        {% for name in switcher %}
+        <a class="tool-link" href="/tool/{{ name }}"{% if active == "tool" and current == name %} aria-current="page"{% endif %}>{{ name }}</a>
+        {% endfor %}
+      </span>
+      {% endif %}
+      <a href="/settings"{% if active == "settings" %} class="active" aria-current="page"{% endif %}>Settings</a>
+      <a href="/logs"{% if active == "logs" %} class="active" aria-current="page"{% endif %}>Logs</a>
     </nav>
   </header>
   <main class="page">
@@ -27,6 +34,8 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% block footer %}
   <footer class="shell-footer">Read-only toward AWS: DadsOps never calls AWS itself and stores no credentials.</footer>
+  {% endblock %}
 </body>
 </html>

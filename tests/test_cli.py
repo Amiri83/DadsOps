@@ -86,6 +86,50 @@ def test_existing_complete_venv_is_reused_without_pip(checkout):
     assert not any("pip" in command for command, _ in checkout["runs"])
 
 
+PYPROJECT_WITH_TOOLS = """
+[project]
+name = "dadsops"
+dependencies = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "tool-a>=1.2", "tool_b >= 1.6"]
+[project.optional-dependencies]
+tools = ["tool-c>=0.1"]
+"""
+
+
+def test_required_distributions_come_from_pyproject(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT_WITH_TOOLS)
+
+    assert cli.required_distributions(tmp_path) == ["fastapi", "uvicorn", "tool-a", "tool_b"]
+    assert cli.required_distributions(tmp_path / "missing") == []
+
+
+def test_the_repo_bootstrap_installs_the_bundled_tools_not_the_held_one():
+    names = cli.required_distributions(Path(__file__).resolve().parents[1])
+
+    assert {"ec2patcher", "aws-iplens"} <= set(names)
+    assert "aws-tflens" not in names
+
+
+def test_venv_missing_a_bundled_tool_is_reinstalled(checkout, monkeypatch):
+    """Modules import fine but a bundled tool's distribution is missing: pip runs."""
+    (checkout["root"] / "pyproject.toml").write_text(PYPROJECT_WITH_TOOLS)
+    (checkout["root"] / ".venv" / "bin").mkdir(parents=True)
+    (checkout["root"] / ".venv" / "bin" / "python").touch()
+
+    def dist_probe_fails(command, **kwargs):
+        checkout["runs"].append((command, kwargs))
+        failed = "-c" in command and "importlib.metadata" in command[2]
+        return subprocess.CompletedProcess(command, 1 if failed else 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", dist_probe_fails)
+    with pytest.raises(Execed):
+        cli.main([])
+
+    commands = [command for command, _ in checkout["runs"]]
+    dist_probe = next(c for c in commands if "-c" in c and "importlib.metadata" in c[2])
+    assert dist_probe[3:] == ["fastapi", "uvicorn", "tool-a", "tool_b"]
+    assert any(c[1:4] == ["-m", "pip", "install"] for c in commands)
+
+
 def test_registry_flag_is_passed_through_the_reexec(checkout):
     with pytest.raises(Execed) as execed:
         cli.main(["run", "--registry", "custom.yaml"])

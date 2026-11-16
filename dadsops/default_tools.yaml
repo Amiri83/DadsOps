@@ -1,24 +1,28 @@
 # DadsOps tool registry for a pip install.
 # Copied once to ~/.config/dadsops/tools.yaml on first run; edit that copy, it is never
-# overwritten. No paths: each tool is a console script installed from PyPI
-# (`pip install ec2patcher` ...), found on PATH or in the venv DadsOps runs from, and
-# started in your home directory. Add `path: ~/EC2Patcher` to an entry to run a checkout
-# instead (the start command then runs inside that directory).
+# overwritten. No paths: each tool is a console script from the PyPI distribution named in
+# `package`, which `pip install dadsops` installs alongside it. A tool is looked up in the
+# venv DadsOps runs from first, then on PATH, and started in your home directory. Add
+# `path: ~/EC2Patcher` to an entry to run a checkout instead (the start command then runs
+# inside that directory).
 # Placeholders in start_command: {port} {profile} {region} {log_dir}.
 # Per-app port, profile, enabled and extra args are set on the Settings page and win over this file.
 tools:
   - name: EC2Patcher
     description: Patch EC2 servers from CVE lists
+    package: ec2patcher
     start_command: ec2patcher --port {port}
     port: 8081
 
   - name: IPLens
     description: Private IP usage per subnet/ENI
+    package: aws-iplens
     start_command: iplens --port {port}
     port: 8082
 
   - name: TFLens
     description: "Explain Terraform repos: resources, access, code refs"
+    package: aws-tflens
     start_command: tflens serve --port {port}
     port: 8083
 

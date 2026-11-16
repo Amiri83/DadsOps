@@ -1,8 +1,8 @@
-"""FastAPI app: home page, start/open, stop, settings and logs."""
+"""FastAPI app: home page, start/open, the tool page, stop, settings and logs."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,10 +23,20 @@ from dadsops.config import (
     save_settings,
 )
 from dadsops.forms import form_values, read_form, settings_from_form
+from dadsops.framing import FrameCheck, check_framing
 from dadsops.logs import TAIL_LINES, log_file, tail
 from dadsops.paths import PACKAGE_DIR
 from dadsops.registry import RegistryError, Tool, load_registry
 from dadsops.runner import HOST, Runner
+
+# Sec-Fetch-Site values for a request another site caused (a link or embed elsewhere):
+# the tool page then asks before starting anything instead of starting on a plain GET.
+FOREIGN_FETCH_SITES = ("cross-site", "same-site")
+
+
+def tool_url(tool: Tool) -> str:
+    """The tool's own address: its effective (settings-overridden) port on loopback."""
+    return f"http://{HOST}:{tool.port}/"
 
 
 @dataclass(frozen=True)
@@ -40,7 +50,12 @@ class State:
     launches: dict[str, Launch]
 
 
-def create_app(registry_path: Path, config_path: Path, runner: Runner | None = None) -> FastAPI:
+def create_app(
+    registry_path: Path,
+    config_path: Path,
+    runner: Runner | None = None,
+    frame_check: Callable[[str, str], FrameCheck] = check_framing,
+) -> FastAPI:
     runner = runner or Runner()
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
 
@@ -86,9 +101,29 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         context = {
             "settings_error": state.settings_error,
             "registry_error": state.registry_error,
+            "switcher": switcher(state),
             **context,
         }
         return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+    def switcher(state: State) -> list[str]:
+        """Tools the top bar links to: the ones that can be opened (installed and enabled)."""
+        return [
+            name
+            for name, launch in state.launches.items()
+            if not launch.tool.coming_soon and launch.enabled and launch.tool.installed
+        ]
+
+    def start(state: State, launch: Launch) -> str | None:
+        """Start the tool unless it already runs; the reason it could not, else None.
+
+        The failure is also kept in runner.errors, so its card shows it too."""
+        name = launch.tool.name
+        if state.settings_error:
+            runner.errors[name] = f"settings are invalid: {state.settings_error}"
+            return runner.errors[name]
+        result = runner.start(launch)
+        return None if result.ok else result.message
 
     @app.exception_handler(StarletteHTTPException)
     async def error_page(request: Request, exc: StarletteHTTPException) -> Response:
@@ -137,14 +172,35 @@ def create_app(registry_path: Path, config_path: Path, runner: Runner | None = N
         require_same_origin(request)
         state = load_state()
         launch = find_launch(state, name)
+        if launch is None or start(state, launch) is not None:
+            return home_redirect()
+        return RedirectResponse(f"/tool/{name}", status_code=303)
+
+    @app.get("/tool/{name}", response_class=HTMLResponse)
+    def tool_page(name: str, request: Request) -> Response:
+        """The tool inside DadsOps: top bar plus an iframe, or why it cannot be framed."""
+        state = load_state()
+        launch = find_launch(state, name)
         if launch is None:
             return home_redirect()
-        if state.settings_error:
-            runner.errors[name] = f"settings are invalid: {state.settings_error}"
-            return home_redirect()
-        if not runner.start(launch).ok:
-            return home_redirect()
-        return RedirectResponse(f"http://{HOST}:{launch.tool.port}/", status_code=303)
+        tool = launch.tool
+        url = tool_url(tool)
+        page = {"active": "tool", "current": name, "tool": tool, "url": url}
+
+        error = None
+        if not runner.is_running(tool):
+            if request.headers.get("sec-fetch-site") in FOREIGN_FETCH_SITES:
+                return render(request, "tool.html", state, needs_start=True, **page)
+            error = start(state, launch)
+        if error is None:
+            check = frame_check(url, str(request.base_url))
+            if check.error is not None:
+                error = runner.errors[name] = check.error
+            elif not check.allowed:
+                return render(request, "tool.html", state, blocked_by=check.blocked_by, **page)
+        if error is not None:
+            return render(request, "tool.html", state, status_code=502, error=error, **page)
+        return render(request, "tool.html", state, framed=True, **page)
 
     @app.post("/stop/{name}")
     def stop_tool(name: str, request: Request) -> RedirectResponse:
